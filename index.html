@@ -286,11 +286,18 @@ function fmtCountdown(targetDate) {
   return `${mins}m ${String(secs).padStart(2,'0')}s`;
 }
 
+// A date field "counts as having happened" only if it's set AND in the past.
+// Operators sometimes pre-fill ATD/ATA with planned dates before the event
+// actually occurs — we don't want a future ATA to flip status to "arrived".
+function hasOccurred(dateStr) {
+  return !!dateStr && isPast(dateStr);
+}
+
 function getStatus(rec) {
   if (rec.delivered) return 'delivered';
-  if (rec.actualDeliveryDate) return 'delivered';
-  if (rec.ata || rec.recovered) return 'arrived';
-  if (rec.atd) return 'transit';
+  if (hasOccurred(rec.actualDeliveryDate)) return 'delivered';
+  if (hasOccurred(rec.ata) || hasOccurred(rec.recovered)) return 'arrived';
+  if (hasOccurred(rec.atd) || hasOccurred(rec.etd)) return 'transit';
   return 'pending';
 }
 
@@ -308,8 +315,8 @@ function getAlerts(rec) {
   if (rec.delivered) return [];
   const alerts = [];
   const sent = preAlertSent(rec);
-  const departed = !!rec.atd || (rec.etd && isPast(rec.etd));
-  const arrived = !!rec.ata || !!rec.recovered;
+  const departed = hasOccurred(rec.atd) || hasOccurred(rec.etd);
+  const arrived  = hasOccurred(rec.ata) || hasOccurred(rec.recovered);
   if (!sent && departed) {
     alerts.push({ level: 'critical', code: 'PRE_ALERT_AFTER_DEPARTURE',
       msg: 'Pre-alert not sent and flight has already departed. Send immediately.' });
@@ -325,7 +332,7 @@ function getAlerts(rec) {
   } else if (!sent) {
     alerts.push({ level: 'warn', code: 'PRE_ALERT_MISSING', msg: 'Pre-alert not yet sent.' });
   }
-  if (arrived && !rec.actualDeliveryDate && !rec.delivered) {
+  if (arrived && !hasOccurred(rec.actualDeliveryDate) && !rec.delivered) {
     const d = parseLocalDate(rec.ata || rec.recovered);
     if (d) {
       const days = (Date.now() - d.getTime()) / 86400000;
@@ -654,10 +661,11 @@ function renderOverview() {
   const criticalAlerts = active.flatMap(r => getAlerts(r).map(a => ({ rec: r, a }))).filter(x => x.a.level === 'critical');
   const upcoming = active.filter(r => {
     if (r.delivered) return false;
-    const target = r.atd ? (r.eta || null) : (r.etd || r.expectedFlyingDate || null);
+    const isDeparted = hasOccurred(r.atd);
+    const target = isDeparted ? (r.eta || null) : (r.etd || r.expectedFlyingDate || null);
     return !!target;
   }).map(r => {
-    const isDeparted = !!r.atd;
+    const isDeparted = hasOccurred(r.atd);
     const target = isDeparted ? r.eta : (r.etd || r.expectedFlyingDate);
     return { rec: r, target, isDeparted };
   }).filter(x => x.target).sort((a, b) => {
@@ -886,10 +894,10 @@ function renderPagination(total, totalPages) {
 // ---------- Timeline ----------
 function renderTimeline() {
   const upcoming = state.records.filter(r => {
-    if (r.delivered || r.actualDeliveryDate) return false;
+    if (r.delivered || hasOccurred(r.actualDeliveryDate)) return false;
     return !!(r.etd || r.eta || r.atd || r.expectedFlyingDate);
   }).map(r => {
-    const isDeparted = !!r.atd;
+    const isDeparted = hasOccurred(r.atd);
     const target = isDeparted ? (r.eta || r.atd) : (r.etd || r.expectedFlyingDate);
     return { rec: r, target, isDeparted };
   }).sort((a, b) => {
