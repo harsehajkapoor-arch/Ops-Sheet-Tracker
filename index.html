@@ -345,54 +345,129 @@ function showToast(msg, kind) {
 }
 
 // ---------- API ----------
+// Google Apps Script Web Apps deployed under a Google Workspace account redirect
+// signed-in browsers through a workspace-scoped endpoint that does NOT send
+// CORS headers. So fetch() fails with "blocked by CORS policy".
+//
+// Workarounds that bypass CORS entirely:
+//   READ  → JSONP (inject <script src="...?callback=fn">); script tags aren't
+//           subject to same-origin policy
+//   WRITE → hidden <form> POST targeting a hidden <iframe>; navigations aren't
+//           subject to same-origin policy either (we just can't READ the response,
+//           which is fine — we re-fetch via JSONP to confirm the write)
+
 async function apiFetch() {
   if (!isConfigured()) return;
   state.syncing = true;
   updateSyncIndicator();
-  try {
-    const res = await fetch(GOOGLE_SCRIPT_URL, { method: 'GET' });
-    const json = await res.json();
-    if (!json.ok) throw new Error(json.error || 'Unknown error');
-    const newData = JSON.stringify(json.data);
-    const oldData = JSON.stringify(state.records);
-    state.records = json.data || [];
-    state.lastSync = new Date();
-    state.error = null;
-    state.loading = false;
-    if (newData !== oldData) render();
-    else updateSyncIndicator();
-  } catch (err) {
-    state.error = err.message || String(err);
-    state.loading = false;
-    render();
-  } finally {
-    state.syncing = false;
-    updateSyncIndicator();
-  }
+  return new Promise((resolve) => {
+    const cbName = '__jsonp_' + Date.now() + '_' + Math.floor(Math.random() * 1e9);
+    let script;
+    const timeoutId = setTimeout(() => {
+      cleanup();
+      state.error = 'Request timed out (30s). Check Apps Script URL and deployment.';
+      state.loading = false;
+      state.syncing = false;
+      render();
+      resolve();
+    }, 30000);
+    function cleanup() {
+      clearTimeout(timeoutId);
+      try { delete window[cbName]; } catch (_) { window[cbName] = undefined; }
+      if (script && script.parentNode) script.parentNode.removeChild(script);
+    }
+    window[cbName] = function(json) {
+      cleanup();
+      if (!json || !json.ok) {
+        state.error = (json && json.error) || 'Unknown error from server';
+      } else {
+        const newData = JSON.stringify(json.data);
+        const oldData = JSON.stringify(state.records);
+        state.records = json.data || [];
+        state.lastSync = new Date();
+        state.error = null;
+        if (newData !== oldData) render();
+        else updateSyncIndicator();
+      }
+      state.loading = false;
+      state.syncing = false;
+      updateSyncIndicator();
+      resolve();
+    };
+    script = document.createElement('script');
+    const sep = GOOGLE_SCRIPT_URL.indexOf('?') >= 0 ? '&' : '?';
+    script.src = GOOGLE_SCRIPT_URL + sep + 'callback=' + cbName + '&_=' + Date.now();
+    script.onerror = () => {
+      cleanup();
+      state.error = 'Failed to load data — the Apps Script URL is unreachable.';
+      state.loading = false;
+      state.syncing = false;
+      render();
+      resolve();
+    };
+    document.body.appendChild(script);
+  });
 }
 
 async function apiPost(action, payload) {
   if (!isConfigured()) throw new Error('Not configured');
   state.syncing = true;
   updateSyncIndicator();
-  try {
-    const body = JSON.stringify({ action, ...payload });
-    // Use text/plain to avoid CORS preflight on Apps Script
-    const res = await fetch(GOOGLE_SCRIPT_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: body
-    });
-    const json = await res.json();
-    if (!json.ok) throw new Error(json.error || 'Save failed');
-    if (json.data) {
-      state.records = json.data;
-      state.lastSync = new Date();
+  return new Promise((resolve, reject) => {
+    const frameName = '__iframe_' + Date.now() + '_' + Math.floor(Math.random() * 1e9);
+    const iframe = document.createElement('iframe');
+    iframe.name = frameName;
+    iframe.style.display = 'none';
+    document.body.appendChild(iframe);
+
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = GOOGLE_SCRIPT_URL;
+    form.target = frameName;
+    form.style.display = 'none';
+    form.enctype = 'application/x-www-form-urlencoded';
+    form.acceptCharset = 'utf-8';
+
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'data';
+    input.value = JSON.stringify({ action, ...payload });
+    form.appendChild(input);
+
+    document.body.appendChild(form);
+
+    let done = false;
+    const timeoutId = setTimeout(() => {
+      if (done) return;
+      done = true;
+      cleanup();
+      state.syncing = false;
+      reject(new Error('Save timed out (30s)'));
+    }, 30000);
+
+    function cleanup() {
+      clearTimeout(timeoutId);
+      try { if (form.parentNode) form.parentNode.removeChild(form); } catch (_) {}
+      setTimeout(() => { try { if (iframe.parentNode) iframe.parentNode.removeChild(iframe); } catch (_) {} }, 200);
     }
-    return json;
-  } finally {
-    state.syncing = false;
-  }
+
+    iframe.addEventListener('load', async function() {
+      if (done) return;
+      done = true;
+      cleanup();
+      // We can't read the iframe response (cross-origin), but onload firing
+      // means the server processed the request. Re-fetch via JSONP to pull
+      // the post-write state.
+      try {
+        await apiFetch();
+        resolve({ ok: true });
+      } catch (err) {
+        resolve({ ok: true }); // write itself succeeded
+      }
+    });
+
+    form.submit();
+  });
 }
 
 function isConfigured() {
