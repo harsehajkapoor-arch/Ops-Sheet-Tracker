@@ -1,0 +1,1097 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MAWB Operations Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ==========================================================
+   MAWB Operations Tracker — UI styles
+   ========================================================== */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  font-family: 'Instrument Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  background: #020617;
+  color: #e2e8f0;
+  min-height: 100vh;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+body {
+  background:
+    radial-gradient(1200px 600px at 0% 0%, rgba(14,165,233,0.06), transparent 60%),
+    radial-gradient(800px 600px at 100% 0%, rgba(16,185,129,0.05), transparent 60%),
+    #020617;
+}
+.mono { font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace; }
+
+/* Layout */
+.app { max-width: 1500px; margin: 0 auto; padding: 24px; }
+
+/* Header */
+.header { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid #1e293b; }
+.brand { display: flex; align-items: center; gap: 14px; }
+.brand-mark { width: 44px; height: 44px; border-radius: 11px; background: linear-gradient(135deg, #0ea5e9, #10b981); display: grid; place-items: center; font-weight: 700; font-size: 18px; color: #0f172a; box-shadow: 0 6px 20px -8px rgba(14,165,233,0.6); }
+.brand-text h1 { font-size: 18px; font-weight: 700; letter-spacing: -0.01em; }
+.brand-text p { color: #64748b; font-size: 12px; margin-top: 2px; }
+.brand-text p .mono { color: #94a3b8; }
+
+.sync-status { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: #0f172a; border: 1px solid #1e293b; border-radius: 999px; font-size: 12px; color: #94a3b8; }
+.sync-dot { width: 8px; height: 8px; border-radius: 999px; background: #10b981; box-shadow: 0 0 0 4px rgba(16,185,129,0.15); }
+.sync-dot.warn { background: #f59e0b; box-shadow: 0 0 0 4px rgba(245,158,11,0.15); }
+.sync-dot.err { background: #ef4444; box-shadow: 0 0 0 4px rgba(239,68,68,0.15); }
+.sync-dot.busy { background: #38bdf8; box-shadow: 0 0 0 4px rgba(56,189,248,0.15); animation: pulse 1.2s infinite; }
+@keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.4;} }
+
+/* Tabs */
+.tabs { display: flex; gap: 4px; padding: 4px; background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; margin-bottom: 20px; overflow-x: auto; }
+.tab { flex: 1; min-width: 110px; padding: 10px 14px; border: none; background: transparent; color: #94a3b8; font-family: inherit; font-size: 13px; font-weight: 500; cursor: pointer; border-radius: 8px; display: flex; align-items: center; justify-content: center; gap: 8px; transition: all 150ms; white-space: nowrap; }
+.tab:hover { color: #e2e8f0; background: #1e293b; }
+.tab.active { background: #1e293b; color: #f1f5f9; box-shadow: 0 1px 0 rgba(255,255,255,0.04) inset; }
+.tab-badge { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: #334155; color: #cbd5e1; font-family: 'JetBrains Mono', monospace; font-weight: 600; }
+.tab.active .tab-badge { background: #0ea5e9; color: #0f172a; }
+.tab-badge.danger { background: #ef4444; color: #fff; }
+.tab.active .tab-badge.danger { background: #ef4444; }
+
+/* Cards */
+.card { background: #0f172a; border: 1px solid #1e293b; border-radius: 14px; padding: 20px; }
+.card-hd { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 12px; flex-wrap: wrap; }
+.card-title { font-size: 13px; font-weight: 600; color: #cbd5e1; letter-spacing: 0.04em; text-transform: uppercase; }
+
+/* Stat grid */
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 20px; }
+.stat { background: #0f172a; border: 1px solid #1e293b; border-radius: 14px; padding: 18px; position: relative; overflow: hidden; }
+.stat::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--accent, #0ea5e9); }
+.stat .label { color: #64748b; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; }
+.stat .value { font-size: 28px; font-weight: 700; margin-top: 6px; color: #f1f5f9; font-family: 'JetBrains Mono', monospace; }
+.stat .sub { color: #64748b; font-size: 12px; margin-top: 4px; }
+.stat.sky { --accent: #0ea5e9; }
+.stat.emerald { --accent: #10b981; }
+.stat.amber { --accent: #f59e0b; }
+.stat.rose { --accent: #f43f5e; }
+.stat.violet { --accent: #8b5cf6; }
+
+/* Controls */
+.controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
+.search-input { flex: 1; min-width: 220px; padding: 10px 14px; background: #0f172a; border: 1px solid #1e293b; border-radius: 10px; color: #e2e8f0; font-family: inherit; font-size: 13px; }
+.search-input:focus { outline: none; border-color: #0ea5e9; box-shadow: 0 0 0 3px rgba(14,165,233,0.15); }
+.select { padding: 10px 14px; background: #0f172a; border: 1px solid #1e293b; border-radius: 10px; color: #e2e8f0; font-family: inherit; font-size: 13px; cursor: pointer; }
+.btn { padding: 10px 16px; border-radius: 10px; border: 1px solid #1e293b; background: #0f172a; color: #e2e8f0; font-family: inherit; font-size: 13px; font-weight: 500; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; transition: all 150ms; }
+.btn:hover { background: #1e293b; border-color: #334155; }
+.btn-primary { background: linear-gradient(135deg, #0ea5e9, #0284c7); border-color: #0ea5e9; color: #fff; }
+.btn-primary:hover { background: linear-gradient(135deg, #38bdf8, #0ea5e9); }
+.btn-emerald { background: linear-gradient(135deg, #10b981, #059669); border-color: #10b981; color: #fff; }
+.btn-emerald:hover { background: linear-gradient(135deg, #34d399, #10b981); }
+.btn-danger { background: #1e293b; border-color: #475569; color: #fca5a5; }
+.btn-danger:hover { background: #ef4444; color: #fff; border-color: #ef4444; }
+.btn-ghost { background: transparent; border: 1px solid transparent; padding: 6px 10px; font-size: 12px; }
+.btn-ghost:hover { background: #1e293b; }
+
+/* Tables */
+.table-wrap { background: #0f172a; border: 1px solid #1e293b; border-radius: 14px; overflow: hidden; }
+.table-scroll { overflow-x: auto; }
+table.data { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.data thead { background: #1e293b; }
+table.data th { padding: 12px; text-align: left; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #94a3b8; white-space: nowrap; }
+table.data td { padding: 12px; border-top: 1px solid #1e293b; vertical-align: top; }
+table.data tbody tr:hover { background: rgba(30,41,59,0.5); }
+table.data .mawb { font-family: 'JetBrains Mono', monospace; font-weight: 600; color: #f1f5f9; }
+table.data .hawb { font-family: 'JetBrains Mono', monospace; color: #cbd5e1; font-size: 12px; }
+table.data .muted { color: #64748b; font-size: 12px; }
+
+/* Badges */
+.badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; font-size: 11px; font-weight: 600; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
+.badge.commercial { background: rgba(139,92,246,0.18); color: #c4b5fd; border: 1px solid rgba(139,92,246,0.35); }
+.badge.express { background: rgba(245,158,11,0.18); color: #fcd34d; border: 1px solid rgba(245,158,11,0.35); }
+.badge.delivered { background: rgba(16,185,129,0.18); color: #6ee7b7; border: 1px solid rgba(16,185,129,0.35); }
+.badge.arrived { background: rgba(14,165,233,0.18); color: #7dd3fc; border: 1px solid rgba(14,165,233,0.35); }
+.badge.transit { background: rgba(245,158,11,0.18); color: #fcd34d; border: 1px solid rgba(245,158,11,0.35); }
+.badge.pending { background: rgba(100,116,139,0.25); color: #cbd5e1; border: 1px solid rgba(100,116,139,0.45); }
+.badge.critical { background: rgba(239,68,68,0.18); color: #fca5a5; border: 1px solid rgba(239,68,68,0.4); }
+.badge.warn { background: rgba(245,158,11,0.18); color: #fcd34d; border: 1px solid rgba(245,158,11,0.4); }
+.badge.ok { background: rgba(16,185,129,0.18); color: #6ee7b7; border: 1px solid rgba(16,185,129,0.35); }
+
+/* Countdown */
+.countdown-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 14px; }
+.countdown-card { background: #0f172a; border: 1px solid #1e293b; border-radius: 14px; padding: 18px; position: relative; overflow: hidden; }
+.countdown-card.urgent { border-color: rgba(239,68,68,0.4); background: rgba(239,68,68,0.04); }
+.countdown-card.soon { border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.04); }
+.countdown-card.transit { border-color: rgba(14,165,233,0.35); background: rgba(14,165,233,0.03); }
+.countdown-hd { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.countdown-hd .mawb { font-family: 'JetBrains Mono', monospace; font-weight: 600; color: #f1f5f9; font-size: 14px; }
+.countdown-hd .meta { color: #64748b; font-size: 11px; margin-top: 4px; }
+.countdown-body { margin: 12px 0; }
+.countdown-label { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; }
+.countdown-timer { font-family: 'JetBrains Mono', monospace; font-size: 22px; font-weight: 700; color: #f1f5f9; margin-top: 4px; letter-spacing: -0.01em; }
+.countdown-timer.urgent { color: #fca5a5; }
+.countdown-timer.soon { color: #fcd34d; }
+.countdown-timer.transit { color: #7dd3fc; }
+.countdown-row { display: flex; gap: 8px; flex-wrap: wrap; font-size: 11px; color: #94a3b8; margin-top: 8px; }
+.countdown-row span { padding: 3px 8px; background: rgba(30,41,59,0.6); border-radius: 6px; }
+.countdown-foot { display: flex; gap: 6px; margin-top: 14px; flex-wrap: wrap; }
+.countdown-foot .btn { padding: 6px 11px; font-size: 11px; }
+
+/* Modal */
+.modal-bg { position: fixed; inset: 0; background: rgba(2,6,23,0.85); backdrop-filter: blur(6px); z-index: 50; display: grid; place-items: center; padding: 16px; overflow-y: auto; }
+.modal { background: #0f172a; border: 1px solid #1e293b; border-radius: 16px; padding: 22px; width: 100%; max-width: 720px; max-height: 92vh; overflow-y: auto; }
+.modal-hd { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid #1e293b; }
+.modal-hd h3 { font-size: 17px; }
+.form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.form-grid.full { grid-template-columns: 1fr; }
+.field { display: flex; flex-direction: column; gap: 5px; }
+.field label { font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
+.field input, .field select, .field textarea { padding: 10px 12px; background: #020617; border: 1px solid #1e293b; border-radius: 8px; color: #e2e8f0; font-family: inherit; font-size: 13px; }
+.field input:focus, .field select:focus, .field textarea:focus { outline: none; border-color: #0ea5e9; box-shadow: 0 0 0 3px rgba(14,165,233,0.15); }
+.modal-foot { display: flex; justify-content: space-between; gap: 10px; margin-top: 20px; padding-top: 16px; border-top: 1px solid #1e293b; }
+.modal-foot .left { display: flex; gap: 10px; }
+.modal-foot .right { display: flex; gap: 10px; }
+
+/* Alert items */
+.alert-item { display: flex; gap: 14px; padding: 14px; border-radius: 12px; background: #0f172a; border: 1px solid #1e293b; margin-bottom: 10px; align-items: flex-start; }
+.alert-item.critical { border-color: rgba(239,68,68,0.35); background: rgba(239,68,68,0.04); }
+.alert-item.warn { border-color: rgba(245,158,11,0.3); background: rgba(245,158,11,0.04); }
+.alert-icon { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; font-weight: 700; font-family: 'JetBrains Mono', monospace; flex-shrink: 0; }
+.alert-icon.critical { background: rgba(239,68,68,0.18); color: #fca5a5; }
+.alert-icon.warn { background: rgba(245,158,11,0.18); color: #fcd34d; }
+.alert-body { flex: 1; }
+.alert-title { font-weight: 600; color: #f1f5f9; font-size: 13px; }
+.alert-msg { color: #94a3b8; font-size: 12px; margin-top: 3px; line-height: 1.5; }
+.alert-action { display: flex; gap: 6px; align-items: center; }
+
+/* Banner */
+.banner { padding: 14px 18px; border-radius: 12px; background: rgba(239,68,68,0.06); border: 1px solid rgba(239,68,68,0.3); margin-bottom: 14px; display: flex; gap: 12px; align-items: flex-start; }
+.banner.warn { background: rgba(245,158,11,0.06); border-color: rgba(245,158,11,0.3); }
+.banner-title { font-weight: 600; color: #f1f5f9; font-size: 13px; }
+.banner-msg { color: #cbd5e1; font-size: 12px; margin-top: 4px; line-height: 1.55; }
+.banner.warn .banner-title { color: #fcd34d; }
+
+/* Empty state */
+.empty { padding: 60px 24px; text-align: center; color: #64748b; }
+.empty h3 { color: #94a3b8; font-size: 16px; margin-bottom: 8px; }
+.empty p { font-size: 13px; line-height: 1.6; }
+
+/* Pagination */
+.pagination { display: flex; justify-content: center; align-items: center; gap: 8px; padding: 14px; border-top: 1px solid #1e293b; background: #0f172a; }
+.pagination button { padding: 6px 12px; background: #1e293b; border: 1px solid #334155; border-radius: 8px; color: #cbd5e1; font-family: inherit; font-size: 12px; cursor: pointer; }
+.pagination button:hover:not(:disabled) { background: #334155; }
+.pagination button:disabled { opacity: 0.4; cursor: not-allowed; }
+.pagination .info { color: #94a3b8; font-size: 12px; font-family: 'JetBrains Mono', monospace; padding: 0 8px; }
+
+/* Toast */
+.toast { position: fixed; bottom: 20px; right: 20px; padding: 12px 18px; background: #1e293b; border: 1px solid #334155; border-radius: 10px; color: #e2e8f0; font-size: 13px; z-index: 100; box-shadow: 0 10px 30px -10px rgba(0,0,0,0.5); display: flex; gap: 10px; align-items: center; animation: slide-in 200ms; }
+.toast.success { border-color: #10b981; }
+.toast.error { border-color: #ef4444; }
+@keyframes slide-in { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+/* Config screen */
+.config-screen { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+.config-card { max-width: 580px; background: #0f172a; border: 1px solid #1e293b; border-radius: 16px; padding: 36px; }
+.config-card h2 { font-size: 22px; margin-bottom: 8px; }
+.config-card p { color: #94a3b8; line-height: 1.6; margin-bottom: 20px; }
+.config-card .codebox { font-family: 'JetBrains Mono', monospace; background: #020617; border: 1px solid #1e293b; border-radius: 8px; padding: 14px; font-size: 12px; color: #94a3b8; margin: 12px 0; overflow-x: auto; }
+
+/* Responsive */
+@media (max-width: 700px) {
+  .app { padding: 14px; }
+  .brand-mark { width: 38px; height: 38px; }
+  .stat .value { font-size: 22px; }
+  .form-grid { grid-template-columns: 1fr; }
+  table.data th, table.data td { padding: 8px; font-size: 12px; }
+}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+// =============================================================
+//  CONFIGURATION  —  replace the URL below after deploying
+//  the Apps Script (see SETUP.md, Step 3).
+// =============================================================
+const GOOGLE_SCRIPT_URL = 'https://script.googleusercontent.com/a/macros/xindus.net/echo?user_content_key=AUkAhnQrg_FDsSrcY0nlTpNXqhxL1PSp8x0ZZoRet-WdRM9_ct3Qm27sBGuJsd1LaheBauVliKjW6KT_pl3XOrkWJTysxWADdY0RcATAlgFNLzmUtNIHSgJ0n7-D-cGM-V6gdUWDlHjkQXGkHp83bUFT3rQ8wOtWi18oUYhKP1I00PX_HiMZ5VEIl6IVbmZ-jyiS7U0htzXsx0HfPD9wV55w5fRf-Pfypk8NGGRKSMrN0Xi0jep5QgLPZpV3Vn3-cEP49FmGmSXzb75al5CdbTXcWZa7r1BB4HQcLp8x6k9A&lib=M_FU1Nysx5hh3yceJt8mCT7B5CJ_5n_PC';
+const POLL_INTERVAL_MS  = 30000;
+const TICK_INTERVAL_MS  = 1000;
+// =============================================================
+
+// ---------- State ----------
+const state = {
+  records: [],
+  loading: true,
+  error: null,
+  lastSync: null,
+  syncing: false,
+  view: 'overview',
+  search: '',
+  statusFilter: 'all',
+  page: 1,
+  pageSize: 50,
+  editing: null,
+  isNew: false,
+  toast: null
+};
+
+// ---------- Utilities ----------
+const $ = sel => document.querySelector(sel);
+const root = () => document.getElementById('root');
+
+function escapeHtml(s) {
+  if (s === null || s === undefined) return '';
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function parseLocalDate(s) {
+  if (!s) return null;
+  const m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return null;
+  const d = new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3]));
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function formatDate(s) {
+  const d = parseLocalDate(s);
+  if (!d) return s || '—';
+  return d.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function isPast(s) {
+  const d = parseLocalDate(s);
+  if (!d) return false;
+  // Compare with end of that day (treat date as "by end of day")
+  const eod = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59);
+  return eod.getTime() < Date.now();
+}
+
+function fmtCountdown(targetDate) {
+  if (!targetDate) return '—';
+  const now = Date.now();
+  const diff = targetDate.getTime() - now;
+  if (diff <= 0) {
+    const past = Math.abs(diff);
+    const days = Math.floor(past / 86400000);
+    const hours = Math.floor((past % 86400000) / 3600000);
+    if (days > 0) return `Overdue ${days}d ${hours}h`;
+    return `Overdue ${hours}h`;
+  }
+  const days = Math.floor(diff / 86400000);
+  const hours = Math.floor((diff % 86400000) / 3600000);
+  const mins = Math.floor((diff % 3600000) / 60000);
+  const secs = Math.floor((diff % 60000) / 1000);
+  if (days > 0) return `${days}d ${hours}h ${mins}m`;
+  if (hours > 0) return `${hours}h ${mins}m ${String(secs).padStart(2,'0')}s`;
+  return `${mins}m ${String(secs).padStart(2,'0')}s`;
+}
+
+function getStatus(rec) {
+  if (rec.delivered) return 'delivered';
+  if (rec.actualDeliveryDate) return 'delivered';
+  if (rec.ata || rec.recovered) return 'arrived';
+  if (rec.atd) return 'transit';
+  return 'pending';
+}
+
+function preAlertSent(rec) {
+  // Sent if there is a Pre Alert Date, OR text indicates sent/validated
+  if (rec.preAlertDate) return true;
+  const txt = String(rec.preAlertSent || '').toLowerCase();
+  if (!txt) return false;
+  if (txt.includes('not yet') || txt.includes('not sent') || txt === 'no') return false;
+  if (txt.includes('yes') || txt.includes('validated') || txt.includes('sent') || txt.includes('done')) return true;
+  return false;
+}
+
+function getAlerts(rec) {
+  if (rec.delivered) return [];
+  const alerts = [];
+  const sent = preAlertSent(rec);
+  const departed = !!rec.atd || (rec.etd && isPast(rec.etd));
+  const arrived = !!rec.ata || !!rec.recovered;
+  if (!sent && departed) {
+    alerts.push({ level: 'critical', code: 'PRE_ALERT_AFTER_DEPARTURE',
+      msg: 'Pre-alert not sent and flight has already departed. Send immediately.' });
+  } else if (!sent && rec.etd && !isPast(rec.etd)) {
+    const d = parseLocalDate(rec.etd);
+    if (d) {
+      const hours = (d.getTime() - Date.now()) / 3600000;
+      if (hours < 48) {
+        alerts.push({ level: 'warn', code: 'PRE_ALERT_DUE_SOON',
+          msg: `Pre-alert not sent; flight departs in less than 48h (${formatDate(rec.etd)}).` });
+      }
+    }
+  } else if (!sent) {
+    alerts.push({ level: 'warn', code: 'PRE_ALERT_MISSING', msg: 'Pre-alert not yet sent.' });
+  }
+  if (arrived && !rec.actualDeliveryDate && !rec.delivered) {
+    const d = parseLocalDate(rec.ata || rec.recovered);
+    if (d) {
+      const days = (Date.now() - d.getTime()) / 86400000;
+      if (days > 7) {
+        alerts.push({ level: 'warn', code: 'NO_DELIVERY_7D',
+          msg: `Arrived ${Math.floor(days)}d ago but no delivery date recorded.` });
+      }
+    }
+  }
+  return alerts;
+}
+
+function showToast(msg, kind) {
+  state.toast = { msg, kind: kind || 'success' };
+  render();
+  setTimeout(() => { state.toast = null; render(); }, 2800);
+}
+
+// ---------- API ----------
+async function apiFetch() {
+  if (!isConfigured()) return;
+  state.syncing = true;
+  updateSyncIndicator();
+  try {
+    const res = await fetch(GOOGLE_SCRIPT_URL, { method: 'GET' });
+    const json = await res.json();
+    if (!json.ok) throw new Error(json.error || 'Unknown error');
+    const newData = JSON.stringify(json.data);
+    const oldData = JSON.stringify(state.records);
+    state.records = json.data || [];
+    state.lastSync = new Date();
+    state.error = null;
+    state.loading = false;
+    if (newData !== oldData) render();
+    else updateSyncIndicator();
+  } catch (err) {
+    state.error = err.message || String(err);
+    state.loading = false;
+    render();
+  } finally {
+    state.syncing = false;
+    updateSyncIndicator();
+  }
+}
+
+async function apiPost(action, payload) {
+  if (!isConfigured()) throw new Error('Not configured');
+  state.syncing = true;
+  updateSyncIndicator();
+  try {
+    const body = JSON.stringify({ action, ...payload });
+    // Use text/plain to avoid CORS preflight on Apps Script
+    const res = await fetch(GOOGLE_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: body
+    });
+    const json = await res.json();
+    if (!json.ok) throw new Error(json.error || 'Save failed');
+    if (json.data) {
+      state.records = json.data;
+      state.lastSync = new Date();
+    }
+    return json;
+  } finally {
+    state.syncing = false;
+  }
+}
+
+function isConfigured() {
+  return GOOGLE_SCRIPT_URL && GOOGLE_SCRIPT_URL !== 'PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE';
+}
+
+// ---------- Actions ----------
+async function saveRecord(rec) {
+  try {
+    if (state.isNew) {
+      await apiPost('create', { record: rec });
+      showToast('Shipment added');
+    } else {
+      await apiPost('update', { id: state.editing.id, record: rec });
+      showToast('Shipment updated');
+    }
+    state.editing = null;
+    state.isNew = false;
+    render();
+  } catch (err) {
+    showToast('Save failed: ' + err.message, 'error');
+  }
+}
+
+async function deleteRecord(id) {
+  if (!confirm('Delete this shipment record? This removes the row from the Google Sheet.')) return;
+  try {
+    await apiPost('delete', { id });
+    showToast('Shipment deleted');
+    state.editing = null;
+    render();
+  } catch (err) {
+    showToast('Delete failed: ' + err.message, 'error');
+  }
+}
+
+async function markDeliveredAction(id, delivered) {
+  try {
+    await apiPost('markDelivered', { id, delivered });
+    showToast(delivered ? 'Marked as delivered' : 'Marked as undelivered');
+    render();
+  } catch (err) {
+    showToast('Action failed: ' + err.message, 'error');
+  }
+}
+
+// ---------- Render: top-level shell ----------
+function render() {
+  if (!isConfigured()) { renderConfigScreen(); return; }
+  if (state.loading && state.records.length === 0) {
+    root().innerHTML = `
+      <div class="app">
+        ${renderHeader()}
+        <div class="empty">
+          <h3>Connecting to Google Sheet…</h3>
+          <p>Fetching your latest data. This may take a few seconds on first load.</p>
+        </div>
+      </div>`;
+    return;
+  }
+  root().innerHTML = `
+    <div class="app">
+      ${renderHeader()}
+      ${state.error ? renderErrorBanner() : ''}
+      ${renderTabs()}
+      ${renderActiveView()}
+      ${state.editing || state.isNew ? renderEditModal() : ''}
+      ${state.toast ? renderToast() : ''}
+    </div>`;
+  attachHandlers();
+  updateAllCountdowns();
+}
+
+function renderConfigScreen() {
+  root().innerHTML = `
+    <div class="config-screen">
+      <div class="config-card">
+        <h2>⚙️ Setup required</h2>
+        <p>Before this tracker can connect to your Google Sheet, you need to deploy the Apps Script and paste its URL into <span class="mono">index.html</span>.</p>
+        <p><strong>Quick checklist:</strong></p>
+        <ol style="color: #94a3b8; line-height: 1.8; padding-left: 20px; font-size: 13px;">
+          <li>Open your Google Sheet → <em>Extensions → Apps Script</em></li>
+          <li>Paste the contents of <span class="mono">Code.gs</span> and save</li>
+          <li><em>Deploy → New deployment → Web app</em><br>Execute as: <strong>Me</strong> · Access: <strong>Anyone</strong></li>
+          <li>Copy the deployment URL</li>
+          <li>In <span class="mono">index.html</span>, replace:<div class="codebox">const GOOGLE_SCRIPT_URL = 'PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE';</div>with the URL you copied.</li>
+          <li>Push to GitHub and enable Pages.</li>
+        </ol>
+        <p style="margin-top: 20px; font-size: 12px; color: #64748b;">See <span class="mono">SETUP.md</span> for the full walkthrough.</p>
+      </div>
+    </div>`;
+}
+
+function renderHeader() {
+  const total = state.records.length;
+  const lastSync = state.lastSync ? state.lastSync.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—';
+  const dotClass = state.error ? 'err' : state.syncing ? 'busy' : 'ok';
+  const statusText = state.error ? 'Sync error' : state.syncing ? 'Syncing…' : `Live · last ${lastSync}`;
+  return `
+    <div class="header">
+      <div class="brand">
+        <div class="brand-mark">MX</div>
+        <div class="brand-text">
+          <h1>MAWB Operations Tracker</h1>
+          <p><span class="mono">${total}</span> records · synced with Google Sheets</p>
+        </div>
+      </div>
+      <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+        <div class="sync-status" id="sync-status">
+          <span class="sync-dot ${dotClass}"></span>
+          <span id="sync-text">${escapeHtml(statusText)}</span>
+        </div>
+        <button class="btn" onclick="apiFetch()">↻ Refresh</button>
+        <button class="btn btn-primary" onclick="openNew()">+ New Shipment</button>
+      </div>
+    </div>`;
+}
+
+function updateSyncIndicator() {
+  const el = document.getElementById('sync-status');
+  if (!el) return;
+  const dot = el.querySelector('.sync-dot');
+  const text = el.querySelector('#sync-text');
+  if (!dot || !text) return;
+  const dotClass = state.error ? 'err' : state.syncing ? 'busy' : 'ok';
+  dot.className = 'sync-dot ' + dotClass;
+  const lastSync = state.lastSync ? state.lastSync.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—';
+  text.textContent = state.error ? 'Sync error' : state.syncing ? 'Syncing…' : `Live · last ${lastSync}`;
+}
+
+function renderErrorBanner() {
+  return `<div class="banner">
+    <div>
+      <div class="banner-title">⚠ Couldn't reach Google Sheet</div>
+      <div class="banner-msg">${escapeHtml(state.error)}<br>Check the Apps Script URL and that it's deployed with "Anyone" access.</div>
+    </div>
+  </div>`;
+}
+
+function renderTabs() {
+  const recs = state.records;
+  const comm = recs.filter(r => r.type === 'commercial' && !r.delivered).length;
+  const exp  = recs.filter(r => r.type === 'express' && !r.delivered).length;
+  const alertCount = recs.reduce((n, r) => n + getAlerts(r).filter(a => a.level === 'critical').length, 0);
+  const upcoming = recs.filter(r => !r.delivered && (r.etd || r.eta || r.atd)).length;
+  const tabs = [
+    { id: 'overview',   label: 'Overview',   badge: null },
+    { id: 'commercial', label: 'Commercial', badge: comm },
+    { id: 'express',    label: 'Express',    badge: exp },
+    { id: 'timeline',   label: 'Timeline',   badge: upcoming },
+    { id: 'alerts',     label: 'Alerts',     badge: alertCount, danger: alertCount > 0 },
+  ];
+  return `
+    <div class="tabs">
+      ${tabs.map(t => `
+        <button class="tab ${state.view === t.id ? 'active' : ''}" onclick="setView('${t.id}')">
+          <span>${t.label}</span>
+          ${t.badge !== null ? `<span class="tab-badge ${t.danger ? 'danger' : ''}">${t.badge}</span>` : ''}
+        </button>
+      `).join('')}
+    </div>`;
+}
+
+function renderActiveView() {
+  switch (state.view) {
+    case 'overview':   return renderOverview();
+    case 'commercial': return renderShipments('commercial');
+    case 'express':    return renderShipments('express');
+    case 'timeline':   return renderTimeline();
+    case 'alerts':     return renderAlerts();
+  }
+  return '';
+}
+
+// ---------- Overview ----------
+function renderOverview() {
+  const recs = state.records;
+  const active = recs.filter(r => !r.delivered);
+  const commercial = recs.filter(r => r.type === 'commercial' && !r.delivered);
+  const express = recs.filter(r => r.type === 'express' && !r.delivered);
+  const delivered = recs.filter(r => r.delivered || r.actualDeliveryDate);
+  const inTransit = active.filter(r => getStatus(r) === 'transit').length;
+  const arrived = active.filter(r => getStatus(r) === 'arrived').length;
+  const criticalAlerts = active.flatMap(r => getAlerts(r).map(a => ({ rec: r, a }))).filter(x => x.a.level === 'critical');
+  const upcoming = active.filter(r => {
+    if (r.delivered) return false;
+    const target = r.atd ? (r.eta || null) : (r.etd || r.expectedFlyingDate || null);
+    return !!target;
+  }).map(r => {
+    const isDeparted = !!r.atd;
+    const target = isDeparted ? r.eta : (r.etd || r.expectedFlyingDate);
+    return { rec: r, target, isDeparted };
+  }).filter(x => x.target).sort((a, b) => {
+    const da = parseLocalDate(a.target), db = parseLocalDate(b.target);
+    return (da ? da.getTime() : Infinity) - (db ? db.getTime() : Infinity);
+  }).slice(0, 12);
+
+  return `
+    <div class="stat-grid">
+      <div class="stat sky"><div class="label">Active</div><div class="value">${active.length}</div><div class="sub">${commercial.length} commercial · ${express.length} express</div></div>
+      <div class="stat amber"><div class="label">In transit</div><div class="value">${inTransit}</div><div class="sub">departed, awaiting arrival</div></div>
+      <div class="stat emerald"><div class="label">Arrived</div><div class="value">${arrived}</div><div class="sub">recovered / pending delivery</div></div>
+      <div class="stat violet"><div class="label">Delivered</div><div class="value">${delivered.length}</div><div class="sub">final-mile complete</div></div>
+      <div class="stat rose"><div class="label">Critical alerts</div><div class="value">${criticalAlerts.length}</div><div class="sub">pre-alert violations</div></div>
+    </div>
+
+    ${criticalAlerts.length > 0 ? `
+      <div class="banner">
+        <div>
+          <div class="banner-title">${criticalAlerts.length} critical alert${criticalAlerts.length === 1 ? '' : 's'} — pre-alert not sent before departure</div>
+          <div class="banner-msg">Open the Alerts tab to review. Per ops policy: <strong>pre-alert must be sent prior to flight departure.</strong></div>
+        </div>
+      </div>` : ''}
+
+    <div class="card" style="margin-bottom: 16px;">
+      <div class="card-hd">
+        <div class="card-title">⏱ Upcoming · live countdown</div>
+        <div style="color: #64748b; font-size: 12px;">${upcoming.length} flights scheduled</div>
+      </div>
+      ${upcoming.length === 0 ? `
+        <div class="empty"><p>No upcoming flights with scheduled departure or arrival dates.</p></div>
+      ` : `
+        <div class="countdown-grid">
+          ${upcoming.map(({ rec, target, isDeparted }) => renderCountdownCard(rec, target, isDeparted)).join('')}
+        </div>
+      `}
+    </div>
+  `;
+}
+
+function renderCountdownCard(rec, targetStr, isDeparted) {
+  const target = parseLocalDate(targetStr);
+  const ms = target ? target.getTime() - Date.now() : 0;
+  const days = ms > 0 ? Math.floor(ms / 86400000) : -1;
+  let urgency = 'transit';
+  if (!isDeparted) {
+    if (ms < 0) urgency = 'urgent';
+    else if (days < 2) urgency = 'soon';
+    else urgency = '';
+  } else {
+    urgency = 'transit';
+  }
+  const label = isDeparted ? 'Arrives in' : 'Departs in';
+  const lastMile = rec.type === 'commercial'
+    ? [rec.carrier, rec.ltlVendor].filter(Boolean).join(' · ') || (rec.modeOfDelivery || '')
+    : [rec.airline, rec.partner].filter(Boolean).join(' · ');
+  const preSent = preAlertSent(rec);
+  return `
+    <div class="countdown-card ${urgency}">
+      <div class="countdown-hd">
+        <div>
+          <div class="mawb">${escapeHtml(rec.mawb)}</div>
+          ${rec.hawb ? `<div class="hawb mono">HAWB ${escapeHtml(rec.hawb)}</div>` : ''}
+          <div class="meta">
+            <span class="badge ${rec.type}">${rec.type}</span>
+            ${rec.flightNumber ? `<span class="mono" style="margin-left:6px;">${escapeHtml(rec.flightNumber)}</span>` : ''}
+          </div>
+        </div>
+        <span class="badge ${preSent ? 'ok' : 'critical'}">${preSent ? 'PA ✓' : 'PA ✗'}</span>
+      </div>
+      <div class="countdown-body">
+        <div class="countdown-label">${label} (${escapeHtml(formatDate(targetStr))})</div>
+        <div class="countdown-timer ${urgency}" data-countdown-target="${escapeHtml(targetStr)}">${escapeHtml(fmtCountdown(target))}</div>
+      </div>
+      ${lastMile ? `<div class="countdown-row"><span>Last mile: ${escapeHtml(lastMile)}</span></div>` : ''}
+      <div class="countdown-foot">
+        <button class="btn btn-emerald" onclick="markDeliveredAction('${escapeHtml(rec.id)}', true)">✓ Mark delivered</button>
+        <button class="btn" onclick="openEdit('${escapeHtml(rec.id)}')">Edit</button>
+      </div>
+    </div>`;
+}
+
+function updateAllCountdowns() {
+  document.querySelectorAll('[data-countdown-target]').forEach(el => {
+    const target = parseLocalDate(el.dataset.countdownTarget);
+    if (target) el.textContent = fmtCountdown(target);
+  });
+}
+
+// ---------- Shipments tab (commercial / express) ----------
+function renderShipments(type) {
+  const all = state.records.filter(r => r.type === type);
+  const filtered = applyFilters(all);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / state.pageSize));
+  if (state.page > totalPages) state.page = totalPages;
+  const start = (state.page - 1) * state.pageSize;
+  const pageRecs = filtered.slice(start, start + state.pageSize);
+
+  const isCommercial = type === 'commercial';
+  const columns = isCommercial
+    ? ['MAWB', 'HAWB', 'Flight', 'Pre-Alert', 'ETD / ATD', 'ETA / ATA', 'Last Mile Carrier', 'Status', '']
+    : ['MAWB', 'Airline', 'Flight', 'Pre-Alert', 'ETD / ATD', 'ETA', 'Partner', 'Port', 'Status', ''];
+
+  return `
+    <div class="controls">
+      <input class="search-input" id="searchInput" placeholder="Search MAWB, HAWB, flight, shipper, carrier…" value="${escapeHtml(state.search)}">
+      <select class="select" id="statusFilter">
+        <option value="all" ${state.statusFilter==='all'?'selected':''}>All statuses</option>
+        <option value="pending" ${state.statusFilter==='pending'?'selected':''}>Pending</option>
+        <option value="transit" ${state.statusFilter==='transit'?'selected':''}>In transit</option>
+        <option value="arrived" ${state.statusFilter==='arrived'?'selected':''}>Arrived</option>
+        <option value="delivered" ${state.statusFilter==='delivered'?'selected':''}>Delivered</option>
+        <option value="alerts" ${state.statusFilter==='alerts'?'selected':''}>With alerts</option>
+      </select>
+      <div style="color: #64748b; font-size: 12px; margin-left: auto;">${filtered.length} of ${all.length} records</div>
+    </div>
+    <div class="table-wrap">
+      <div class="table-scroll">
+        <table class="data">
+          <thead><tr>${columns.map(c => `<th>${c}</th>`).join('')}</tr></thead>
+          <tbody>
+            ${pageRecs.length === 0
+              ? `<tr><td colspan="${columns.length}"><div class="empty"><h3>No matching records</h3><p>Try adjusting your search or filter.</p></div></td></tr>`
+              : pageRecs.map(r => isCommercial ? renderCommRow(r) : renderExpressRow(r)).join('')}
+          </tbody>
+        </table>
+      </div>
+      ${renderPagination(filtered.length, totalPages)}
+    </div>
+  `;
+}
+
+function renderCommRow(r) {
+  const status = getStatus(r);
+  const lastMile = [r.carrier, r.ltlVendor].filter(Boolean).join(' · ') || (r.modeOfDelivery || '—');
+  const alerts = getAlerts(r);
+  const hasCritical = alerts.some(a => a.level === 'critical');
+  const sent = preAlertSent(r);
+  return `
+    <tr>
+      <td><div class="mawb">${escapeHtml(r.mawb || '—')}</div>${r.shipper ? `<div class="muted">${escapeHtml(r.shipper)}</div>` : ''}</td>
+      <td><div class="hawb">${escapeHtml(r.hawb || '—')}</div>${r.consignee ? `<div class="muted">${escapeHtml(r.consignee)}</div>` : ''}</td>
+      <td><div class="mono">${escapeHtml(r.flightNumber || '—')}</div></td>
+      <td>
+        <span class="badge ${sent ? 'ok' : (hasCritical ? 'critical' : 'warn')}">${sent ? 'Sent' : 'Missing'}</span>
+        ${r.preAlertDate ? `<div class="muted">${escapeHtml(formatDate(r.preAlertDate))}</div>` : ''}
+      </td>
+      <td>
+        <div class="muted">ETD ${escapeHtml(formatDate(r.etd))}</div>
+        <div class="muted">ATD ${escapeHtml(formatDate(r.atd))}</div>
+      </td>
+      <td>
+        <div class="muted">ETA ${escapeHtml(formatDate(r.eta))}</div>
+        <div class="muted">ATA ${escapeHtml(formatDate(r.ata))}</div>
+      </td>
+      <td><div>${escapeHtml(lastMile)}</div>${r.proNumber ? `<div class="muted mono">PRO ${escapeHtml(r.proNumber)}</div>` : ''}</td>
+      <td><span class="badge ${status}">${status}</span>${hasCritical ? ' <span class="badge critical">!</span>' : ''}</td>
+      <td>
+        <button class="btn btn-ghost" onclick="openEdit('${escapeHtml(r.id)}')">Edit</button>
+        ${r.delivered ? `<button class="btn btn-ghost" onclick="markDeliveredAction('${escapeHtml(r.id)}', false)">Undeliver</button>`
+                       : `<button class="btn btn-ghost" onclick="markDeliveredAction('${escapeHtml(r.id)}', true)">Delivered</button>`}
+      </td>
+    </tr>`;
+}
+
+function renderExpressRow(r) {
+  const status = getStatus(r);
+  const alerts = getAlerts(r);
+  const hasCritical = alerts.some(a => a.level === 'critical');
+  const sent = preAlertSent(r);
+  return `
+    <tr>
+      <td><div class="mawb">${escapeHtml(r.mawb || '—')}</div>${r.totalHawb ? `<div class="muted">HAWBs: ${escapeHtml(r.totalHawb)}</div>` : ''}</td>
+      <td><div>${escapeHtml(r.airline || '—')}</div>${r.uld ? `<div class="muted mono">ULD ${escapeHtml(r.uld)}</div>` : ''}</td>
+      <td><div class="mono">${escapeHtml(r.flightNumber || '—')}</div></td>
+      <td>
+        <span class="badge ${sent ? 'ok' : (hasCritical ? 'critical' : 'warn')}">${sent ? 'Sent' : 'Missing'}</span>
+        ${r.preAlertDate ? `<div class="muted">${escapeHtml(formatDate(r.preAlertDate))}</div>` : ''}
+      </td>
+      <td>
+        <div class="muted">ETD ${escapeHtml(formatDate(r.etd))}</div>
+        <div class="muted">ATD ${escapeHtml(formatDate(r.atd))}</div>
+      </td>
+      <td><div class="muted">${escapeHtml(formatDate(r.eta))}</div></td>
+      <td><div>${escapeHtml(r.partner || '—')}</div>${r.dcPartner ? `<div class="muted">DC: ${escapeHtml(r.dcPartner)}</div>` : ''}</td>
+      <td><div>${escapeHtml(r.port || '—')}</div></td>
+      <td><span class="badge ${status}">${status}</span>${hasCritical ? ' <span class="badge critical">!</span>' : ''}</td>
+      <td>
+        <button class="btn btn-ghost" onclick="openEdit('${escapeHtml(r.id)}')">Edit</button>
+        ${r.delivered ? `<button class="btn btn-ghost" onclick="markDeliveredAction('${escapeHtml(r.id)}', false)">Undeliver</button>`
+                       : `<button class="btn btn-ghost" onclick="markDeliveredAction('${escapeHtml(r.id)}', true)">Delivered</button>`}
+      </td>
+    </tr>`;
+}
+
+function applyFilters(records) {
+  const q = state.search.trim().toLowerCase();
+  return records.filter(r => {
+    if (q) {
+      const hay = [r.mawb, r.hawb, r.flightNumber, r.shipper, r.consignee, r.carrier, r.ltlVendor, r.airline, r.partner, r.port, r.uld, r.proNumber].filter(Boolean).join(' ').toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    if (state.statusFilter !== 'all') {
+      if (state.statusFilter === 'alerts') {
+        if (getAlerts(r).length === 0) return false;
+      } else {
+        if (getStatus(r) !== state.statusFilter) return false;
+      }
+    }
+    return true;
+  });
+}
+
+function renderPagination(total, totalPages) {
+  if (total === 0) return '';
+  const start = (state.page - 1) * state.pageSize + 1;
+  const end = Math.min(state.page * state.pageSize, total);
+  return `
+    <div class="pagination">
+      <button onclick="setPage(${state.page - 1})" ${state.page === 1 ? 'disabled' : ''}>← Prev</button>
+      <span class="info">${start}–${end} of ${total} · page ${state.page} of ${totalPages}</span>
+      <button onclick="setPage(${state.page + 1})" ${state.page >= totalPages ? 'disabled' : ''}>Next →</button>
+    </div>`;
+}
+
+// ---------- Timeline ----------
+function renderTimeline() {
+  const upcoming = state.records.filter(r => {
+    if (r.delivered || r.actualDeliveryDate) return false;
+    return !!(r.etd || r.eta || r.atd || r.expectedFlyingDate);
+  }).map(r => {
+    const isDeparted = !!r.atd;
+    const target = isDeparted ? (r.eta || r.atd) : (r.etd || r.expectedFlyingDate);
+    return { rec: r, target, isDeparted };
+  }).sort((a, b) => {
+    const da = parseLocalDate(a.target), db = parseLocalDate(b.target);
+    return (da ? da.getTime() : Infinity) - (db ? db.getTime() : Infinity);
+  });
+
+  return `
+    <div class="controls">
+      <select class="select" id="timelineFilter" onchange="setStatusFilter(this.value)">
+        <option value="all" ${state.statusFilter==='all'?'selected':''}>All upcoming</option>
+        <option value="commercial" ${state.statusFilter==='commercial'?'selected':''}>Commercial only</option>
+        <option value="express" ${state.statusFilter==='express'?'selected':''}>Express only</option>
+      </select>
+      <div style="color: #64748b; font-size: 12px;">Delivered shipments are hidden — click "Mark delivered" on cards to remove them here.</div>
+    </div>
+    ${upcoming.length === 0
+      ? `<div class="card"><div class="empty"><h3>Nothing upcoming</h3><p>No shipments with scheduled departures or arrivals.</p></div></div>`
+      : `<div class="countdown-grid">
+          ${upcoming.filter(x => state.statusFilter === 'all' || state.statusFilter === x.rec.type)
+                    .map(({ rec, target, isDeparted }) => renderCountdownCard(rec, target, isDeparted))
+                    .join('')}
+        </div>`}
+  `;
+}
+
+// ---------- Alerts ----------
+function renderAlerts() {
+  const allAlerts = state.records.filter(r => !r.delivered).flatMap(r => getAlerts(r).map(a => ({ rec: r, a })));
+  allAlerts.sort((x, y) => (x.a.level === 'critical' ? -1 : 1) - (y.a.level === 'critical' ? -1 : 1));
+  const critical = allAlerts.filter(x => x.a.level === 'critical');
+  const warn = allAlerts.filter(x => x.a.level === 'warn');
+
+  return `
+    <div class="banner ${critical.length > 0 ? '' : 'warn'}">
+      <div>
+        <div class="banner-title">${critical.length > 0 ? `${critical.length} critical · ${warn.length} warnings` : `${warn.length} warnings`}</div>
+        <div class="banner-msg"><strong>Policy:</strong> Pre-alert must be sent prior to flight departure. Critical alerts are shipments where pre-alert is missing and the flight has already departed (ATD set or ETD in the past).</div>
+      </div>
+    </div>
+
+    ${critical.length === 0 && warn.length === 0
+      ? `<div class="card"><div class="empty"><h3>All clear</h3><p>No active alerts. Great work keeping pre-alerts on schedule.</p></div></div>`
+      : `
+        ${critical.length > 0 ? `
+          <div class="card" style="margin-bottom: 14px;">
+            <div class="card-hd"><div class="card-title">🚨 Critical · pre-alert violations</div></div>
+            ${critical.map(({ rec, a }) => renderAlertItem(rec, a)).join('')}
+          </div>` : ''}
+        ${warn.length > 0 ? `
+          <div class="card">
+            <div class="card-hd"><div class="card-title">⚠ Warnings</div></div>
+            ${warn.map(({ rec, a }) => renderAlertItem(rec, a)).join('')}
+          </div>` : ''}
+      `}
+  `;
+}
+
+function renderAlertItem(rec, alert) {
+  const level = alert.level;
+  return `
+    <div class="alert-item ${level}">
+      <div class="alert-icon ${level}">${level === 'critical' ? '!' : '?'}</div>
+      <div class="alert-body">
+        <div class="alert-title">
+          <span class="mono">${escapeHtml(rec.mawb)}</span>
+          ${rec.hawb ? ` · <span class="mono">HAWB ${escapeHtml(rec.hawb)}</span>` : ''}
+          <span class="badge ${rec.type}" style="margin-left: 6px;">${rec.type}</span>
+        </div>
+        <div class="alert-msg">${escapeHtml(alert.msg)}
+          ${rec.etd ? ` · ETD ${escapeHtml(formatDate(rec.etd))}` : ''}
+          ${rec.atd ? ` · ATD ${escapeHtml(formatDate(rec.atd))}` : ''}
+          ${rec.preAlertSent ? ` · Status: "${escapeHtml(rec.preAlertSent)}"` : ''}
+        </div>
+      </div>
+      <div class="alert-action">
+        <button class="btn btn-ghost" onclick="openEdit('${escapeHtml(rec.id)}')">Open</button>
+      </div>
+    </div>`;
+}
+
+// ---------- Edit modal ----------
+function renderEditModal() {
+  const editing = state.isNew ? newRecordTemplate() : state.editing;
+  const isCommercial = editing.type === 'commercial';
+  return `
+    <div class="modal-bg" onclick="if(event.target===this)closeModal()">
+      <div class="modal">
+        <div class="modal-hd">
+          <h3>${state.isNew ? 'New shipment' : 'Edit shipment'} <span class="badge ${editing.type}" style="margin-left:8px;">${editing.type}</span></h3>
+          <button class="btn btn-ghost" onclick="closeModal()">✕</button>
+        </div>
+        <form id="editForm" onsubmit="return submitEdit(event)">
+          ${state.isNew ? `
+            <div class="form-grid">
+              <div class="field">
+                <label>Type</label>
+                <select name="type" required onchange="state.editing={...state.editing,type:this.value};render()">
+                  <option value="commercial" ${editing.type==='commercial'?'selected':''}>Commercial</option>
+                  <option value="express" ${editing.type==='express'?'selected':''}>Express</option>
+                </select>
+              </div>
+            </div>` : ''}
+
+          <div class="form-grid">
+            <div class="field"><label>MAWB *</label><input name="mawb" value="${escapeHtml(editing.mawb)}" required></div>
+            ${isCommercial ? `<div class="field"><label>HAWB</label><input name="hawb" value="${escapeHtml(editing.hawb)}"></div>` : ''}
+            ${!isCommercial ? `<div class="field"><label>Airline</label><input name="airline" value="${escapeHtml(editing.airline)}"></div>` : ''}
+            <div class="field"><label>Flight number</label><input name="flightNumber" value="${escapeHtml(editing.flightNumber)}"></div>
+            <div class="field"><label>Pre-alert status</label><input name="preAlertSent" value="${escapeHtml(editing.preAlertSent)}" placeholder="e.g. Sent, Validated by …, Not yet"></div>
+            <div class="field"><label>Pre-alert date</label><input type="date" name="preAlertDate" value="${escapeHtml(editing.preAlertDate)}"></div>
+            <div class="field"><label>Expected flying date</label><input type="date" name="expectedFlyingDate" value="${escapeHtml(editing.expectedFlyingDate)}"></div>
+            <div class="field"><label>ETD</label><input type="date" name="etd" value="${escapeHtml(editing.etd)}"></div>
+            <div class="field"><label>ATD</label><input type="date" name="atd" value="${escapeHtml(editing.atd)}"></div>
+            <div class="field"><label>ETA</label><input type="date" name="eta" value="${escapeHtml(editing.eta)}"></div>
+            ${isCommercial ? `<div class="field"><label>ATA</label><input type="date" name="ata" value="${escapeHtml(editing.ata)}"></div>` : ''}
+            <div class="field"><label>Recovered</label><input type="date" name="recovered" value="${escapeHtml(editing.recovered)}"></div>
+            ${isCommercial ? `
+              <div class="field"><label>Shipper</label><input name="shipper" value="${escapeHtml(editing.shipper)}"></div>
+              <div class="field"><label>Consignee / IOR</label><input name="consignee" value="${escapeHtml(editing.consignee)}"></div>
+              <div class="field"><label>Weight (Kgs)</label><input name="weight" value="${escapeHtml(editing.weight)}"></div>
+              <div class="field"><label>Incoterm</label><input name="incoterm" value="${escapeHtml(editing.incoterm)}"></div>
+              <div class="field"><label>CFS</label><input name="cfs" value="${escapeHtml(editing.cfs)}"></div>
+              <div class="field"><label>CHB</label><input name="chb" value="${escapeHtml(editing.chb)}"></div>
+              <div class="field"><label>Pallets / Boxes</label><input name="pallets" value="${escapeHtml(editing.pallets)}"></div>
+              <div class="field"><label>Mode of delivery</label><input name="modeOfDelivery" value="${escapeHtml(editing.modeOfDelivery)}"></div>
+              <div class="field"><label>Carrier (last mile)</label><input name="carrier" value="${escapeHtml(editing.carrier)}"></div>
+              <div class="field"><label>LTL vendor</label><input name="ltlVendor" value="${escapeHtml(editing.ltlVendor)}"></div>
+              <div class="field"><label>PRO #</label><input name="proNumber" value="${escapeHtml(editing.proNumber)}"></div>
+              <div class="field"><label>Pickup date</label><input type="date" name="pickupDate" value="${escapeHtml(editing.pickupDate)}"></div>
+              <div class="field"><label>Est. delivery date</label><input type="date" name="estDeliveryDate" value="${escapeHtml(editing.estDeliveryDate)}"></div>
+              <div class="field"><label>Actual delivery date</label><input type="date" name="actualDeliveryDate" value="${escapeHtml(editing.actualDeliveryDate)}"></div>
+              <div class="field"><label>Estimated price</label><input name="estimatedPrice" value="${escapeHtml(editing.estimatedPrice)}"></div>
+              <div class="field"><label>Achieved price</label><input name="achievedPrice" value="${escapeHtml(editing.achievedPrice)}"></div>
+            ` : `
+              <div class="field"><label>ULD</label><input name="uld" value="${escapeHtml(editing.uld)}"></div>
+              <div class="field"><label>Partner</label><input name="partner" value="${escapeHtml(editing.partner)}"></div>
+              <div class="field"><label>OC clearance partner</label><input name="ocPartner" value="${escapeHtml(editing.ocPartner)}"></div>
+              <div class="field"><label>DC clearance partner</label><input name="dcPartner" value="${escapeHtml(editing.dcPartner)}"></div>
+              <div class="field"><label>CFS partner</label><input name="cfs" value="${escapeHtml(editing.cfs)}"></div>
+              <div class="field"><label># of packages</label><input name="numPkgs" value="${escapeHtml(editing.numPkgs)}"></div>
+              <div class="field"><label>Total HAWBs</label><input name="totalHawb" value="${escapeHtml(editing.totalHawb)}"></div>
+              <div class="field"><label>Port</label><input name="port" value="${escapeHtml(editing.port)}"></div>
+              <div class="field"><label>Handover date</label><input type="date" name="handoverDate" value="${escapeHtml(editing.handoverDate)}"></div>
+              <div class="field"><label>Customs clearance</label><input type="date" name="customsClearance" value="${escapeHtml(editing.customsClearance)}"></div>
+            `}
+          </div>
+          ${isCommercial ? `
+            <div class="form-grid full" style="margin-top:12px;">
+              <div class="field"><label>Delivery address</label><textarea name="deliveryAddress" rows="2">${escapeHtml(editing.deliveryAddress)}</textarea></div>
+            </div>` : ''}
+          <div class="modal-foot">
+            <div class="left">
+              ${!state.isNew ? `<button type="button" class="btn btn-danger" onclick="deleteRecord('${escapeHtml(state.editing.id)}')">Delete</button>` : ''}
+              ${!state.isNew && !state.editing.delivered ? `<button type="button" class="btn btn-emerald" onclick="markDeliveredAction('${escapeHtml(state.editing.id)}', true);closeModal()">✓ Mark delivered</button>` : ''}
+              ${!state.isNew && state.editing.delivered ? `<button type="button" class="btn" onclick="markDeliveredAction('${escapeHtml(state.editing.id)}', false);closeModal()">↩ Mark undelivered</button>` : ''}
+            </div>
+            <div class="right">
+              <button type="button" class="btn" onclick="closeModal()">Cancel</button>
+              <button type="submit" class="btn btn-primary">${state.isNew ? 'Create' : 'Save changes'}</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>`;
+}
+
+function newRecordTemplate() {
+  return {
+    type: 'commercial', mawb: '', hawb: '', flightNumber: '', airline: '',
+    preAlertSent: '', preAlertDate: '', expectedFlyingDate: '',
+    etd: '', atd: '', eta: '', ata: '', recovered: '',
+    shipper: '', consignee: '', weight: '', incoterm: '', cfs: '', chb: '',
+    pallets: '', modeOfDelivery: '', carrier: '', ltlVendor: '', deliveryAddress: '',
+    estimatedPrice: '', achievedPrice: '', proNumber: '',
+    pickupDate: '', estDeliveryDate: '', actualDeliveryDate: '',
+    uld: '', partner: '', ocPartner: '', dcPartner: '',
+    numPkgs: '', totalHawb: '', port: '', handoverDate: '', customsClearance: ''
+  };
+}
+
+function renderToast() {
+  return `<div class="toast ${state.toast.kind}">${state.toast.kind === 'success' ? '✓' : '✕'} ${escapeHtml(state.toast.msg)}</div>`;
+}
+
+// ---------- Handlers ----------
+function setView(v) {
+  state.view = v;
+  state.page = 1;
+  if (v !== 'shipments') state.statusFilter = 'all';
+  render();
+}
+
+function setStatusFilter(v) { state.statusFilter = v; state.page = 1; render(); }
+function setPage(p) { state.page = Math.max(1, p); render(); }
+
+function openEdit(id) {
+  const rec = state.records.find(r => r.id === id);
+  if (!rec) return;
+  state.editing = { ...newRecordTemplate(), ...rec };
+  state.isNew = false;
+  render();
+}
+
+function openNew() {
+  state.editing = newRecordTemplate();
+  state.isNew = true;
+  render();
+}
+
+function closeModal() {
+  state.editing = null;
+  state.isNew = false;
+  render();
+}
+
+function submitEdit(e) {
+  e.preventDefault();
+  const formData = new FormData(e.target);
+  const rec = {};
+  for (const [k, v] of formData.entries()) rec[k] = v;
+  if (state.isNew && !rec.type) rec.type = 'commercial';
+  if (!state.isNew) rec.type = state.editing.type;
+  if (!rec.mawb || !rec.mawb.trim()) { showToast('MAWB is required', 'error'); return false; }
+  saveRecord(rec);
+  return false;
+}
+
+function attachHandlers() {
+  const s = document.getElementById('searchInput');
+  if (s) {
+    s.addEventListener('input', e => { state.search = e.target.value; state.page = 1; debouncedRender(); });
+  }
+  const sf = document.getElementById('statusFilter');
+  if (sf) sf.addEventListener('change', e => { state.statusFilter = e.target.value; state.page = 1; render(); });
+}
+
+let debounceTimer = null;
+function debouncedRender() {
+  if (debounceTimer) clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(render, 200);
+}
+
+// Preserve search input focus across debounce-driven re-renders
+let lastFocusedSearchValue = null;
+const originalRender = render;
+window.render = function() {
+  const active = document.activeElement;
+  const wasSearch = active && active.id === 'searchInput';
+  const caret = wasSearch ? active.selectionStart : null;
+  originalRender();
+  if (wasSearch) {
+    const newSearch = document.getElementById('searchInput');
+    if (newSearch) {
+      newSearch.focus();
+      try { if (caret !== null) newSearch.setSelectionRange(caret, caret); } catch(_) {}
+    }
+  }
+};
+
+// Expose for inline handlers
+Object.assign(window, {
+  setView, setStatusFilter, setPage, openEdit, openNew, closeModal,
+  submitEdit, saveRecord, deleteRecord, markDeliveredAction, apiFetch, state
+});
+
+// ---------- Init ----------
+function init() {
+  render();
+  if (isConfigured()) {
+    apiFetch();
+    setInterval(apiFetch, POLL_INTERVAL_MS);
+    setInterval(updateAllCountdowns, TICK_INTERVAL_MS);
+  }
+}
+
+init();
+</script>
+</body>
+</html>
