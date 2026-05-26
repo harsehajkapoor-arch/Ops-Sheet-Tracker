@@ -101,6 +101,7 @@ table.data tbody tr:hover { background: rgba(30,41,59,0.5); }
 table.data .mawb { font-family: 'JetBrains Mono', monospace; font-weight: 600; color: #f1f5f9; }
 table.data .hawb { font-family: 'JetBrains Mono', monospace; color: #cbd5e1; font-size: 12px; }
 table.data .muted { color: #64748b; font-size: 12px; }
+table.data .remarks-hint { color: #fcd34d; font-size: 11px; margin-top: 4px; padding: 3px 8px; background: rgba(245,158,11,0.08); border-left: 2px solid rgba(245,158,11,0.5); border-radius: 3px; max-width: 280px; line-height: 1.4; }
 
 /* Badges */
 .badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; font-size: 11px; font-weight: 600; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
@@ -211,7 +212,7 @@ table.data .muted { color: #64748b; font-size: 12px; }
 //  CONFIGURATION  —  replace the URL below after deploying
 //  the Apps Script (see SETUP.md, Step 3).
 // =============================================================
-const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwaoeGgfjk2iG4vu1ayTX6oZ_yRfFQYUqYu1aT-dNjV2-e2DBjphYM5J5O4v4SoHEKD/exec';
+const GOOGLE_SCRIPT_URL = 'PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE';
 const POLL_INTERVAL_MS  = 30000;
 const TICK_INTERVAL_MS  = 1000;
 // =============================================================
@@ -417,9 +418,11 @@ async function apiFetch() {
 }
 
 async function apiPost(action, payload) {
+  // Fire-and-forget POST via hidden iframe form. Returns when the server has
+  // received and processed the request (iframe load fires). Does NOT refetch
+  // data — callers update state.records optimistically; the regular 30-second
+  // poll reconciles. This makes saves feel instant instead of 5-7 seconds.
   if (!isConfigured()) throw new Error('Not configured');
-  state.syncing = true;
-  updateSyncIndicator();
   return new Promise((resolve, reject) => {
     const frameName = '__iframe_' + Date.now() + '_' + Math.floor(Math.random() * 1e9);
     const iframe = document.createElement('iframe');
@@ -448,7 +451,6 @@ async function apiPost(action, payload) {
       if (done) return;
       done = true;
       cleanup();
-      state.syncing = false;
       reject(new Error('Save timed out (30s)'));
     }, 30000);
 
@@ -458,19 +460,11 @@ async function apiPost(action, payload) {
       setTimeout(() => { try { if (iframe.parentNode) iframe.parentNode.removeChild(iframe); } catch (_) {} }, 200);
     }
 
-    iframe.addEventListener('load', async function() {
+    iframe.addEventListener('load', function() {
       if (done) return;
       done = true;
       cleanup();
-      // We can't read the iframe response (cross-origin), but onload firing
-      // means the server processed the request. Re-fetch via JSONP to pull
-      // the post-write state.
-      try {
-        await apiFetch();
-        resolve({ ok: true });
-      } catch (err) {
-        resolve({ ok: true }); // write itself succeeded
-      }
+      resolve({ ok: true });
     });
 
     form.submit();
@@ -482,42 +476,85 @@ function isConfigured() {
 }
 
 // ---------- Actions ----------
+// All actions update local state immediately so the UI feels instant.
+// The server POST runs in parallel; the 30-second poll catches up.
+
 async function saveRecord(rec) {
-  try {
-    if (state.isNew) {
-      await apiPost('create', { record: rec });
-      showToast('Shipment added');
-    } else {
-      await apiPost('update', { id: state.editing.id, record: rec });
-      showToast('Shipment updated');
-    }
+  if (state.isNew) {
+    // New records: we don't have the server-assigned ID yet, so we use a
+    // temporary one locally, fire the POST, and refetch shortly after so
+    // the real ID arrives. This is the only action that needs a refetch.
+    const tempId = 'temp_' + Date.now();
+    state.records = [...state.records, { id: tempId, ...rec, _pending: true }];
     state.editing = null;
     state.isNew = false;
+    showToast('Adding shipment…');
     render();
-  } catch (err) {
-    showToast('Save failed: ' + err.message, 'error');
+    try {
+      await apiPost('create', { record: rec });
+      showToast('Shipment added');
+      // Refetch once to replace temp ID with real one from sheet
+      setTimeout(() => apiFetch(), 800);
+    } catch (err) {
+      // Roll back the optimistic insert
+      state.records = state.records.filter(r => r.id !== tempId);
+      showToast('Save failed: ' + err.message, 'error');
+      render();
+    }
+  } else {
+    // Update: patch local state immediately, then POST in the background
+    const id = state.editing.id;
+    const before = state.records.find(r => r.id === id);
+    state.records = state.records.map(r => r.id === id ? { ...r, ...rec } : r);
+    state.editing = null;
+    state.isNew = false;
+    showToast('Saved');
+    render();
+    try {
+      await apiPost('update', { id, record: rec });
+    } catch (err) {
+      // Roll back
+      if (before) state.records = state.records.map(r => r.id === id ? before : r);
+      showToast('Save failed: ' + err.message, 'error');
+      render();
+    }
   }
 }
 
 async function deleteRecord(id) {
   if (!confirm('Delete this shipment record? This removes the row from the Google Sheet.')) return;
+  const before = state.records.find(r => r.id === id);
+  state.records = state.records.filter(r => r.id !== id);
+  state.editing = null;
+  showToast('Deleted');
+  render();
   try {
     await apiPost('delete', { id });
-    showToast('Shipment deleted');
-    state.editing = null;
-    render();
   } catch (err) {
+    // Roll back
+    if (before) state.records = [...state.records, before];
     showToast('Delete failed: ' + err.message, 'error');
+    render();
   }
 }
 
 async function markDeliveredAction(id, delivered) {
+  const before = state.records.find(r => r.id === id);
+  state.records = state.records.map(r => r.id === id ? {
+    ...r,
+    delivered: !!delivered,
+    deliveredAt: delivered ? new Date().toISOString().slice(0, 10) : '',
+    ...(delivered && r.type === 'commercial' && !r.actualDeliveryDate
+        ? { actualDeliveryDate: new Date().toISOString().slice(0, 10) } : {})
+  } : r);
+  showToast(delivered ? 'Marked delivered' : 'Marked undelivered');
+  render();
   try {
     await apiPost('markDelivered', { id, delivered });
-    showToast(delivered ? 'Marked as delivered' : 'Marked as undelivered');
-    render();
   } catch (err) {
+    if (before) state.records = state.records.map(r => r.id === id ? before : r);
     showToast('Action failed: ' + err.message, 'error');
+    render();
   }
 }
 
@@ -655,23 +692,47 @@ function renderOverview() {
   const active = recs.filter(r => !r.delivered);
   const commercial = recs.filter(r => r.type === 'commercial' && !r.delivered);
   const express = recs.filter(r => r.type === 'express' && !r.delivered);
-  const delivered = recs.filter(r => r.delivered || r.actualDeliveryDate);
+  const delivered = recs.filter(r => r.delivered || hasOccurred(r.actualDeliveryDate));
   const inTransit = active.filter(r => getStatus(r) === 'transit').length;
   const arrived = active.filter(r => getStatus(r) === 'arrived').length;
   const criticalAlerts = active.flatMap(r => getAlerts(r).map(a => ({ rec: r, a }))).filter(x => x.a.level === 'critical');
-  const upcoming = active.filter(r => {
-    if (r.delivered) return false;
-    const isDeparted = hasOccurred(r.atd);
-    const target = isDeparted ? (r.eta || null) : (r.etd || r.expectedFlyingDate || null);
-    return !!target;
+
+  // Build two separate lists:
+  //
+  //  ARRIVING:  shipments in transit — flight has departed (ATD past, or ETD past)
+  //             but hasn't arrived yet (ATA not past, recovered not past).
+  //             Countdown target: ATA (if set & future) → ETA (preferred)
+  //
+  //  DEPARTING: shipments that haven't departed yet (ATD not past, ETD not past).
+  //             Countdown target: ATD (if set & future) → ETD → expected flying date
+  //
+  const arriving = active.filter(r => {
+    const departed = hasOccurred(r.atd) || hasOccurred(r.etd);
+    const hasArrived = hasOccurred(r.ata) || hasOccurred(r.recovered);
+    if (!departed || hasArrived) return false;
+    return !!(r.ata || r.eta);
   }).map(r => {
-    const isDeparted = hasOccurred(r.atd);
-    const target = isDeparted ? r.eta : (r.etd || r.expectedFlyingDate);
-    return { rec: r, target, isDeparted };
+    // Prefer ATA when it's a future date the airline gave us; else ETA
+    const ataFuture = r.ata && !isPast(r.ata);
+    const target = ataFuture ? r.ata : (r.eta || r.ata);
+    return { rec: r, target, isArriving: true };
   }).filter(x => x.target).sort((a, b) => {
     const da = parseLocalDate(a.target), db = parseLocalDate(b.target);
     return (da ? da.getTime() : Infinity) - (db ? db.getTime() : Infinity);
-  }).slice(0, 12);
+  });
+
+  const departing = active.filter(r => {
+    if (hasOccurred(r.atd) || hasOccurred(r.etd)) return false; // already departed
+    if (hasOccurred(r.ata) || hasOccurred(r.recovered)) return false; // already arrived
+    return !!(r.atd || r.etd || r.expectedFlyingDate);
+  }).map(r => {
+    const atdFuture = r.atd && !isPast(r.atd);
+    const target = atdFuture ? r.atd : (r.etd || r.expectedFlyingDate);
+    return { rec: r, target, isArriving: false };
+  }).filter(x => x.target).sort((a, b) => {
+    const da = parseLocalDate(a.target), db = parseLocalDate(b.target);
+    return (da ? da.getTime() : Infinity) - (db ? db.getTime() : Infinity);
+  });
 
   return `
     <div class="stat-grid">
@@ -690,39 +751,57 @@ function renderOverview() {
         </div>
       </div>` : ''}
 
-    <div class="card" style="margin-bottom: 16px;">
+    <div class="card" style="margin-bottom: 16px; border-color: rgba(14,165,233,0.35);">
       <div class="card-hd">
-        <div class="card-title">⏱ Upcoming · live countdown</div>
-        <div style="color: #64748b; font-size: 12px;">${upcoming.length} flights scheduled</div>
+        <div class="card-title" style="color: #7dd3fc;">🛬 Arriving in US · live countdown</div>
+        <div style="color: #64748b; font-size: 12px;">${arriving.length} shipments in transit</div>
       </div>
-      ${upcoming.length === 0 ? `
-        <div class="empty"><p>No upcoming flights with scheduled departure or arrival dates.</p></div>
+      ${arriving.length === 0 ? `
+        <div class="empty"><p>No shipments currently in transit to US.</p></div>
       ` : `
         <div class="countdown-grid">
-          ${upcoming.map(({ rec, target, isDeparted }) => renderCountdownCard(rec, target, isDeparted)).join('')}
+          ${arriving.slice(0, 12).map(({ rec, target, isArriving }) => renderCountdownCard(rec, target, isArriving)).join('')}
+        </div>
+      `}
+    </div>
+
+    <div class="card" style="margin-bottom: 16px;">
+      <div class="card-hd">
+        <div class="card-title">🛫 Departing soon</div>
+        <div style="color: #64748b; font-size: 12px;">${departing.length} flights scheduled</div>
+      </div>
+      ${departing.length === 0 ? `
+        <div class="empty"><p>No upcoming departures scheduled.</p></div>
+      ` : `
+        <div class="countdown-grid">
+          ${departing.slice(0, 12).map(({ rec, target, isArriving }) => renderCountdownCard(rec, target, isArriving)).join('')}
         </div>
       `}
     </div>
   `;
 }
 
-function renderCountdownCard(rec, targetStr, isDeparted) {
+function renderCountdownCard(rec, targetStr, isArriving) {
   const target = parseLocalDate(targetStr);
   const ms = target ? target.getTime() - Date.now() : 0;
   const days = ms > 0 ? Math.floor(ms / 86400000) : -1;
-  let urgency = 'transit';
-  if (!isDeparted) {
+  const hours = ms > 0 ? Math.floor(ms / 3600000) : -1;
+  let urgency = '';
+  if (isArriving) {
+    urgency = ms < 0 ? 'urgent' : (hours < 24 ? 'soon' : 'transit');
+  } else {
     if (ms < 0) urgency = 'urgent';
     else if (days < 2) urgency = 'soon';
     else urgency = '';
-  } else {
-    urgency = 'transit';
   }
-  const label = isDeparted ? 'Arrives in' : 'Departs in';
+  const label = isArriving ? 'Arriving in' : 'Departs in';
   const lastMile = rec.type === 'commercial'
     ? [rec.carrier, rec.ltlVendor].filter(Boolean).join(' · ') || (rec.modeOfDelivery || '')
     : [rec.airline, rec.partner].filter(Boolean).join(' · ');
   const preSent = preAlertSent(rec);
+  const dateLabel = isArriving
+    ? (rec.ata && !isPast(rec.ata) ? 'ATA ' + formatDate(rec.ata) : 'ETA ' + formatDate(targetStr))
+    : (rec.atd && !isPast(rec.atd) ? 'ATD ' + formatDate(rec.atd) : 'ETD ' + formatDate(targetStr));
   return `
     <div class="countdown-card ${urgency}">
       <div class="countdown-hd">
@@ -737,10 +816,11 @@ function renderCountdownCard(rec, targetStr, isDeparted) {
         <span class="badge ${preSent ? 'ok' : 'critical'}">${preSent ? 'PA ✓' : 'PA ✗'}</span>
       </div>
       <div class="countdown-body">
-        <div class="countdown-label">${label} (${escapeHtml(formatDate(targetStr))})</div>
+        <div class="countdown-label">${label} · ${escapeHtml(dateLabel)}</div>
         <div class="countdown-timer ${urgency}" data-countdown-target="${escapeHtml(targetStr)}">${escapeHtml(fmtCountdown(target))}</div>
       </div>
       ${lastMile ? `<div class="countdown-row"><span>Last mile: ${escapeHtml(lastMile)}</span></div>` : ''}
+      ${rec.remarks ? `<div class="countdown-row"><span style="background: rgba(245,158,11,0.12); color: #fcd34d;" title="${escapeHtml(rec.remarks)}">📝 ${escapeHtml(rec.remarks.slice(0, 80))}${rec.remarks.length > 80 ? '…' : ''}</span></div>` : ''}
       <div class="countdown-foot">
         <button class="btn btn-emerald" onclick="markDeliveredAction('${escapeHtml(rec.id)}', true)">✓ Mark delivered</button>
         <button class="btn" onclick="openEdit('${escapeHtml(rec.id)}')">Edit</button>
@@ -804,9 +884,10 @@ function renderCommRow(r) {
   const alerts = getAlerts(r);
   const hasCritical = alerts.some(a => a.level === 'critical');
   const sent = preAlertSent(r);
+  const remarksPreview = r.remarks ? `<div class="remarks-hint" title="${escapeHtml(r.remarks)}">📝 ${escapeHtml(r.remarks.slice(0, 60))}${r.remarks.length > 60 ? '…' : ''}</div>` : '';
   return `
     <tr>
-      <td><div class="mawb">${escapeHtml(r.mawb || '—')}</div>${r.shipper ? `<div class="muted">${escapeHtml(r.shipper)}</div>` : ''}</td>
+      <td><div class="mawb">${escapeHtml(r.mawb || '—')}</div>${r.shipper ? `<div class="muted">${escapeHtml(r.shipper)}</div>` : ''}${remarksPreview}</td>
       <td><div class="hawb">${escapeHtml(r.hawb || '—')}</div>${r.consignee ? `<div class="muted">${escapeHtml(r.consignee)}</div>` : ''}</td>
       <td><div class="mono">${escapeHtml(r.flightNumber || '—')}</div></td>
       <td>
@@ -836,9 +917,10 @@ function renderExpressRow(r) {
   const alerts = getAlerts(r);
   const hasCritical = alerts.some(a => a.level === 'critical');
   const sent = preAlertSent(r);
+  const remarksPreview = r.remarks ? `<div class="remarks-hint" title="${escapeHtml(r.remarks)}">📝 ${escapeHtml(r.remarks.slice(0, 60))}${r.remarks.length > 60 ? '…' : ''}</div>` : '';
   return `
     <tr>
-      <td><div class="mawb">${escapeHtml(r.mawb || '—')}</div>${r.totalHawb ? `<div class="muted">HAWBs: ${escapeHtml(r.totalHawb)}</div>` : ''}</td>
+      <td><div class="mawb">${escapeHtml(r.mawb || '—')}</div>${r.totalHawb ? `<div class="muted">HAWBs: ${escapeHtml(r.totalHawb)}</div>` : ''}${remarksPreview}</td>
       <td><div>${escapeHtml(r.airline || '—')}</div>${r.uld ? `<div class="muted mono">ULD ${escapeHtml(r.uld)}</div>` : ''}</td>
       <td><div class="mono">${escapeHtml(r.flightNumber || '—')}</div></td>
       <td>
@@ -865,7 +947,7 @@ function applyFilters(records) {
   const q = state.search.trim().toLowerCase();
   return records.filter(r => {
     if (q) {
-      const hay = [r.mawb, r.hawb, r.flightNumber, r.shipper, r.consignee, r.carrier, r.ltlVendor, r.airline, r.partner, r.port, r.uld, r.proNumber].filter(Boolean).join(' ').toLowerCase();
+      const hay = [r.mawb, r.hawb, r.flightNumber, r.shipper, r.consignee, r.carrier, r.ltlVendor, r.airline, r.partner, r.port, r.uld, r.proNumber, r.remarks].filter(Boolean).join(' ').toLowerCase();
       if (!hay.includes(q)) return false;
     }
     if (state.statusFilter !== 'all') {
@@ -895,12 +977,25 @@ function renderPagination(total, totalPages) {
 function renderTimeline() {
   const upcoming = state.records.filter(r => {
     if (r.delivered || hasOccurred(r.actualDeliveryDate)) return false;
-    return !!(r.etd || r.eta || r.atd || r.expectedFlyingDate);
+    return !!(r.etd || r.eta || r.atd || r.ata || r.expectedFlyingDate);
   }).map(r => {
-    const isDeparted = hasOccurred(r.atd);
-    const target = isDeparted ? (r.eta || r.atd) : (r.etd || r.expectedFlyingDate);
-    return { rec: r, target, isDeparted };
-  }).sort((a, b) => {
+    const departed = hasOccurred(r.atd) || hasOccurred(r.etd);
+    const hasArrived = hasOccurred(r.ata) || hasOccurred(r.recovered);
+    if (hasArrived) return null;
+    let target, isArriving;
+    if (departed) {
+      // In-transit → countdown to arrival
+      isArriving = true;
+      const ataFuture = r.ata && !isPast(r.ata);
+      target = ataFuture ? r.ata : (r.eta || r.ata);
+    } else {
+      // Not yet departed → countdown to departure
+      isArriving = false;
+      const atdFuture = r.atd && !isPast(r.atd);
+      target = atdFuture ? r.atd : (r.etd || r.expectedFlyingDate);
+    }
+    return target ? { rec: r, target, isArriving } : null;
+  }).filter(Boolean).sort((a, b) => {
     const da = parseLocalDate(a.target), db = parseLocalDate(b.target);
     return (da ? da.getTime() : Infinity) - (db ? db.getTime() : Infinity);
   });
@@ -918,7 +1013,7 @@ function renderTimeline() {
       ? `<div class="card"><div class="empty"><h3>Nothing upcoming</h3><p>No shipments with scheduled departures or arrivals.</p></div></div>`
       : `<div class="countdown-grid">
           ${upcoming.filter(x => state.statusFilter === 'all' || state.statusFilter === x.rec.type)
-                    .map(({ rec, target, isDeparted }) => renderCountdownCard(rec, target, isDeparted))
+                    .map(({ rec, target, isArriving }) => renderCountdownCard(rec, target, isArriving))
                     .join('')}
         </div>`}
   `;
@@ -1049,6 +1144,9 @@ function renderEditModal() {
             <div class="form-grid full" style="margin-top:12px;">
               <div class="field"><label>Delivery address</label><textarea name="deliveryAddress" rows="2">${escapeHtml(editing.deliveryAddress)}</textarea></div>
             </div>` : ''}
+          <div class="form-grid full" style="margin-top:12px;">
+            <div class="field"><label>📝 Remarks / Comments</label><textarea name="remarks" rows="3" placeholder="Internal notes, special instructions, follow-ups…">${escapeHtml(editing.remarks || '')}</textarea></div>
+          </div>
           <div class="modal-foot">
             <div class="left">
               ${!state.isNew ? `<button type="button" class="btn btn-danger" onclick="deleteRecord('${escapeHtml(state.editing.id)}')">Delete</button>` : ''}
@@ -1075,7 +1173,8 @@ function newRecordTemplate() {
     estimatedPrice: '', achievedPrice: '', proNumber: '',
     pickupDate: '', estDeliveryDate: '', actualDeliveryDate: '',
     uld: '', partner: '', ocPartner: '', dcPartner: '',
-    numPkgs: '', totalHawb: '', port: '', handoverDate: '', customsClearance: ''
+    numPkgs: '', totalHawb: '', port: '', handoverDate: '', customsClearance: '',
+    remarks: ''
   };
 }
 
