@@ -135,6 +135,20 @@ table.data .remarks-hint { color: #fcd34d; font-size: 11px; margin-top: 4px; pad
 .countdown-foot { display: flex; gap: 6px; margin-top: 14px; flex-wrap: wrap; }
 .countdown-foot .btn { padding: 6px 11px; font-size: 11px; }
 
+/* Checklist */
+.checklist { margin-top: 12px; padding: 10px 0 4px; border-top: 1px solid rgba(255,255,255,0.06); display: flex; flex-direction: column; gap: 7px; }
+.check-item { display: flex; align-items: flex-start; gap: 9px; font-size: 12px; color: #94a3b8; cursor: pointer; user-select: none; line-height: 1.35; }
+.check-item input[type="checkbox"] { appearance: none; -webkit-appearance: none; width: 16px; height: 16px; border: 1.5px solid #475569; border-radius: 4px; background: #020617; cursor: pointer; flex-shrink: 0; position: relative; margin-top: 1px; transition: all 120ms; }
+.check-item input[type="checkbox"]:hover { border-color: #64748b; }
+.check-item input[type="checkbox"]:checked { background: #10b981; border-color: #10b981; }
+.check-item input[type="checkbox"]:checked::after { content: '✓'; position: absolute; top: -2px; left: 2px; color: #022c22; font-size: 13px; font-weight: 700; }
+.check-item.done { color: #6ee7b7; }
+.check-item.pending { color: #fcd34d; }
+.checklist-mini { display: inline-flex; gap: 3px; margin-top: 3px; }
+.checklist-dot { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; padding: 0 4px; border-radius: 5px; font-size: 10px; font-weight: 600; border: 1px solid; font-family: 'JetBrains Mono', monospace; }
+.checklist-dot.on { background: rgba(16,185,129,0.18); color: #6ee7b7; border-color: rgba(16,185,129,0.4); }
+.checklist-dot.off { background: rgba(245,158,11,0.12); color: #fcd34d; border-color: rgba(245,158,11,0.35); }
+
 /* Modal */
 .modal-bg { position: fixed; inset: 0; background: rgba(2,6,23,0.85); backdrop-filter: blur(6px); z-index: 50; display: grid; place-items: center; padding: 16px; overflow-y: auto; }
 .modal { background: #0f172a; border: 1px solid #1e293b; border-radius: 16px; padding: 22px; width: 100%; max-width: 720px; max-height: 92vh; overflow-y: auto; }
@@ -212,7 +226,7 @@ table.data .remarks-hint { color: #fcd34d; font-size: 11px; margin-top: 4px; pad
 //  CONFIGURATION  —  replace the URL below after deploying
 //  the Apps Script (see SETUP.md, Step 3).
 // =============================================================
-const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwaoeGgfjk2iG4vu1ayTX6oZ_yRfFQYUqYu1aT-dNjV2-e2DBjphYM5J5O4v4SoHEKD/exec';
+const GOOGLE_SCRIPT_URL = 'PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE';
 const POLL_INTERVAL_MS  = 30000;
 const TICK_INTERVAL_MS  = 1000;
 // =============================================================
@@ -389,9 +403,12 @@ async function apiFetch() {
       if (!json || !json.ok) {
         state.error = (json && json.error) || 'Unknown error from server';
       } else {
-        const newData = JSON.stringify(json.data);
+        // Commercial-only: Express records are ignored entirely by this tool.
+        // The data still exists in the Express sheet, untouched.
+        const commercialOnly = (json.data || []).filter(r => r.type === 'commercial');
+        const newData = JSON.stringify(commercialOnly);
         const oldData = JSON.stringify(state.records);
-        state.records = json.data || [];
+        state.records = commercialOnly;
         state.lastSync = new Date();
         state.error = null;
         if (newData !== oldData) render();
@@ -558,6 +575,22 @@ async function markDeliveredAction(id, delivered) {
   }
 }
 
+async function toggleChecklist(id, field, ev) {
+  if (ev) ev.stopPropagation();
+  const before = state.records.find(r => r.id === id);
+  if (!before) return;
+  const newVal = !before[field];
+  state.records = state.records.map(r => r.id === id ? { ...r, [field]: newVal } : r);
+  render();
+  try {
+    await apiPost('update', { id, record: { [field]: newVal } });
+  } catch (err) {
+    if (before) state.records = state.records.map(r => r.id === id ? before : r);
+    showToast('Update failed: ' + err.message, 'error');
+    render();
+  }
+}
+
 // ---------- Render: top-level shell ----------
 function render() {
   if (!isConfigured()) { renderConfigScreen(); return; }
@@ -653,14 +686,12 @@ function renderErrorBanner() {
 
 function renderTabs() {
   const recs = state.records;
-  const comm = recs.filter(r => r.type === 'commercial' && !r.delivered).length;
-  const exp  = recs.filter(r => r.type === 'express' && !r.delivered).length;
+  const active = recs.filter(r => !r.delivered).length;
   const alertCount = recs.reduce((n, r) => n + getAlerts(r).filter(a => a.level === 'critical').length, 0);
   const upcoming = recs.filter(r => !r.delivered && (r.etd || r.eta || r.atd)).length;
   const tabs = [
     { id: 'overview',   label: 'Overview',   badge: null },
-    { id: 'commercial', label: 'Commercial', badge: comm },
-    { id: 'express',    label: 'Express',    badge: exp },
+    { id: 'commercial', label: 'Shipments',  badge: active },
     { id: 'timeline',   label: 'Timeline',   badge: upcoming },
     { id: 'alerts',     label: 'Alerts',     badge: alertCount, danger: alertCount > 0 },
   ];
@@ -679,23 +710,21 @@ function renderActiveView() {
   switch (state.view) {
     case 'overview':   return renderOverview();
     case 'commercial': return renderShipments('commercial');
-    case 'express':    return renderShipments('express');
     case 'timeline':   return renderTimeline();
     case 'alerts':     return renderAlerts();
   }
-  return '';
+  return renderOverview();
 }
 
 // ---------- Overview ----------
 function renderOverview() {
   const recs = state.records;
   const active = recs.filter(r => !r.delivered);
-  const commercial = recs.filter(r => r.type === 'commercial' && !r.delivered);
-  const express = recs.filter(r => r.type === 'express' && !r.delivered);
   const delivered = recs.filter(r => r.delivered || hasOccurred(r.actualDeliveryDate));
   const inTransit = active.filter(r => getStatus(r) === 'transit').length;
   const arrived = active.filter(r => getStatus(r) === 'arrived').length;
   const criticalAlerts = active.flatMap(r => getAlerts(r).map(a => ({ rec: r, a }))).filter(x => x.a.level === 'critical');
+  const checklistPending = active.filter(r => !r.mailToAirlines || !r.paClearance || !r.paRecovery).length;
 
   // Build two separate lists:
   //
@@ -736,11 +765,12 @@ function renderOverview() {
 
   return `
     <div class="stat-grid">
-      <div class="stat sky"><div class="label">Active</div><div class="value">${active.length}</div><div class="sub">${commercial.length} commercial · ${express.length} express</div></div>
+      <div class="stat sky"><div class="label">Active</div><div class="value">${active.length}</div><div class="sub">in pipeline</div></div>
       <div class="stat amber"><div class="label">In transit</div><div class="value">${inTransit}</div><div class="sub">departed, awaiting arrival</div></div>
       <div class="stat emerald"><div class="label">Arrived</div><div class="value">${arrived}</div><div class="sub">recovered / pending delivery</div></div>
       <div class="stat violet"><div class="label">Delivered</div><div class="value">${delivered.length}</div><div class="sub">final-mile complete</div></div>
       <div class="stat rose"><div class="label">Critical alerts</div><div class="value">${criticalAlerts.length}</div><div class="sub">pre-alert violations</div></div>
+      <div class="stat amber"><div class="label">Checklist pending</div><div class="value">${checklistPending}</div><div class="sub">mail / clearance / recovery</div></div>
     </div>
 
     ${criticalAlerts.length > 0 ? `
@@ -821,6 +851,20 @@ function renderCountdownCard(rec, targetStr, isArriving) {
       </div>
       ${lastMile ? `<div class="countdown-row"><span>Last mile: ${escapeHtml(lastMile)}</span></div>` : ''}
       ${rec.remarks ? `<div class="countdown-row"><span style="background: rgba(245,158,11,0.12); color: #fcd34d;" title="${escapeHtml(rec.remarks)}">📝 ${escapeHtml(rec.remarks.slice(0, 80))}${rec.remarks.length > 80 ? '…' : ''}</span></div>` : ''}
+      <div class="checklist">
+        <label class="check-item ${rec.mailToAirlines ? 'done' : 'pending'}">
+          <input type="checkbox" ${rec.mailToAirlines ? 'checked' : ''} onclick="toggleChecklist('${escapeHtml(rec.id)}', 'mailToAirlines', event)">
+          <span>Mail to airlines · pickup address + FIMS code</span>
+        </label>
+        <label class="check-item ${rec.paClearance ? 'done' : 'pending'}">
+          <input type="checkbox" ${rec.paClearance ? 'checked' : ''} onclick="toggleChecklist('${escapeHtml(rec.id)}', 'paClearance', event)">
+          <span>Pre-alert sent for clearance</span>
+        </label>
+        <label class="check-item ${rec.paRecovery ? 'done' : 'pending'}">
+          <input type="checkbox" ${rec.paRecovery ? 'checked' : ''} onclick="toggleChecklist('${escapeHtml(rec.id)}', 'paRecovery', event)">
+          <span>Pre-alert sent for recovery</span>
+        </label>
+      </div>
       <div class="countdown-foot">
         <button class="btn btn-emerald" onclick="markDeliveredAction('${escapeHtml(rec.id)}', true)">✓ Mark delivered</button>
         <button class="btn" onclick="openEdit('${escapeHtml(rec.id)}')">Edit</button>
@@ -846,7 +890,7 @@ function renderShipments(type) {
 
   const isCommercial = type === 'commercial';
   const columns = isCommercial
-    ? ['MAWB', 'HAWB', 'Flight', 'Pre-Alert', 'ETD / ATD', 'ETA / ATA', 'Last Mile Carrier', 'Status', '']
+    ? ['MAWB', 'HAWB', 'Flight', 'Pre-Alert', 'ETD / ATD', 'ETA / ATA', 'Last Mile Carrier', 'Checklist', 'Status', '']
     : ['MAWB', 'Airline', 'Flight', 'Pre-Alert', 'ETD / ATD', 'ETA', 'Partner', 'Port', 'Status', ''];
 
   return `
@@ -903,6 +947,13 @@ function renderCommRow(r) {
         <div class="muted">ATA ${escapeHtml(formatDate(r.ata))}</div>
       </td>
       <td><div>${escapeHtml(lastMile)}</div>${r.proNumber ? `<div class="muted mono">PRO ${escapeHtml(r.proNumber)}</div>` : ''}</td>
+      <td>
+        <div class="checklist-mini">
+          <span class="checklist-dot ${r.mailToAirlines ? 'on' : 'off'}" title="Mail to airlines (pickup + FIMS): ${r.mailToAirlines ? 'done' : 'pending'}">M</span>
+          <span class="checklist-dot ${r.paClearance ? 'on' : 'off'}" title="PA Clearance: ${r.paClearance ? 'done' : 'pending'}">C</span>
+          <span class="checklist-dot ${r.paRecovery ? 'on' : 'off'}" title="PA Recovery: ${r.paRecovery ? 'done' : 'pending'}">R</span>
+        </div>
+      </td>
       <td><span class="badge ${status}">${status}</span>${hasCritical ? ' <span class="badge critical">!</span>' : ''}</td>
       <td>
         <button class="btn btn-ghost" onclick="openEdit('${escapeHtml(r.id)}')">Edit</button>
@@ -1004,15 +1055,17 @@ function renderTimeline() {
     <div class="controls">
       <select class="select" id="timelineFilter" onchange="setStatusFilter(this.value)">
         <option value="all" ${state.statusFilter==='all'?'selected':''}>All upcoming</option>
-        <option value="commercial" ${state.statusFilter==='commercial'?'selected':''}>Commercial only</option>
-        <option value="express" ${state.statusFilter==='express'?'selected':''}>Express only</option>
+        <option value="arriving" ${state.statusFilter==='arriving'?'selected':''}>Arriving (in transit)</option>
+        <option value="departing" ${state.statusFilter==='departing'?'selected':''}>Departing soon</option>
       </select>
       <div style="color: #64748b; font-size: 12px;">Delivered shipments are hidden — click "Mark delivered" on cards to remove them here.</div>
     </div>
     ${upcoming.length === 0
       ? `<div class="card"><div class="empty"><h3>Nothing upcoming</h3><p>No shipments with scheduled departures or arrivals.</p></div></div>`
       : `<div class="countdown-grid">
-          ${upcoming.filter(x => state.statusFilter === 'all' || state.statusFilter === x.rec.type)
+          ${upcoming.filter(x => state.statusFilter === 'all'
+                                  || (state.statusFilter === 'arriving' && x.isArriving)
+                                  || (state.statusFilter === 'departing' && !x.isArriving))
                     .map(({ rec, target, isArriving }) => renderCountdownCard(rec, target, isArriving))
                     .join('')}
         </div>`}
@@ -1082,20 +1135,11 @@ function renderEditModal() {
     <div class="modal-bg" onclick="if(event.target===this)closeModal()">
       <div class="modal">
         <div class="modal-hd">
-          <h3>${state.isNew ? 'New shipment' : 'Edit shipment'} <span class="badge ${editing.type}" style="margin-left:8px;">${editing.type}</span></h3>
+          <h3>${state.isNew ? 'New shipment' : 'Edit shipment'} <span class="badge commercial" style="margin-left:8px;">commercial</span></h3>
           <button class="btn btn-ghost" onclick="closeModal()">✕</button>
         </div>
         <form id="editForm" onsubmit="return submitEdit(event)">
-          ${state.isNew ? `
-            <div class="form-grid">
-              <div class="field">
-                <label>Type</label>
-                <select name="type" required onchange="state.editing={...state.editing,type:this.value};render()">
-                  <option value="commercial" ${editing.type==='commercial'?'selected':''}>Commercial</option>
-                  <option value="express" ${editing.type==='express'?'selected':''}>Express</option>
-                </select>
-              </div>
-            </div>` : ''}
+          <input type="hidden" name="type" value="commercial">
 
           <div class="form-grid">
             <div class="field"><label>MAWB *</label><input name="mawb" value="${escapeHtml(editing.mawb)}" required></div>
@@ -1145,6 +1189,25 @@ function renderEditModal() {
               <div class="field"><label>Delivery address</label><textarea name="deliveryAddress" rows="2">${escapeHtml(editing.deliveryAddress)}</textarea></div>
             </div>` : ''}
           <div class="form-grid full" style="margin-top:12px;">
+            <div class="field">
+              <label>📋 Required checklist</label>
+              <div class="checklist" style="border-top: none; margin-top: 0; padding-top: 4px;">
+                <label class="check-item ${editing.mailToAirlines ? 'done' : 'pending'}">
+                  <input type="checkbox" name="mailToAirlines" ${editing.mailToAirlines ? 'checked' : ''}>
+                  <span>Mail to airlines sent · pickup address + FIMS code</span>
+                </label>
+                <label class="check-item ${editing.paClearance ? 'done' : 'pending'}">
+                  <input type="checkbox" name="paClearance" ${editing.paClearance ? 'checked' : ''}>
+                  <span>Pre-alert sent for clearance</span>
+                </label>
+                <label class="check-item ${editing.paRecovery ? 'done' : 'pending'}">
+                  <input type="checkbox" name="paRecovery" ${editing.paRecovery ? 'checked' : ''}>
+                  <span>Pre-alert sent for recovery</span>
+                </label>
+              </div>
+            </div>
+          </div>
+          <div class="form-grid full" style="margin-top:12px;">
             <div class="field"><label>📝 Remarks / Comments</label><textarea name="remarks" rows="3" placeholder="Internal notes, special instructions, follow-ups…">${escapeHtml(editing.remarks || '')}</textarea></div>
           </div>
           <div class="modal-foot">
@@ -1174,7 +1237,11 @@ function newRecordTemplate() {
     pickupDate: '', estDeliveryDate: '', actualDeliveryDate: '',
     uld: '', partner: '', ocPartner: '', dcPartner: '',
     numPkgs: '', totalHawb: '', port: '', handoverDate: '', customsClearance: '',
-    remarks: ''
+    remarks: '',
+    // Checklist — new MAWBs start unchecked so the operator ticks them off
+    // as each step happens. Old MAWBs (already in the sheet before the
+    // checklist columns were added) were backfilled with TRUE by the script.
+    mailToAirlines: false, paClearance: false, paRecovery: false
   };
 }
 
@@ -1218,8 +1285,12 @@ function submitEdit(e) {
   const formData = new FormData(e.target);
   const rec = {};
   for (const [k, v] of formData.entries()) rec[k] = v;
-  if (state.isNew && !rec.type) rec.type = 'commercial';
-  if (!state.isNew) rec.type = state.editing.type;
+  // Convert checkbox values to actual booleans (unchecked checkboxes aren't in FormData)
+  const checkboxFields = ['mailToAirlines', 'paClearance', 'paRecovery'];
+  for (const cb of checkboxFields) {
+    rec[cb] = formData.has(cb); // true if checkbox is checked
+  }
+  rec.type = 'commercial'; // tool is commercial-only now
   if (!rec.mawb || !rec.mawb.trim()) { showToast('MAWB is required', 'error'); return false; }
   saveRecord(rec);
   return false;
@@ -1240,14 +1311,18 @@ function debouncedRender() {
   debounceTimer = setTimeout(render, 200);
 }
 
-// Preserve search input focus across debounce-driven re-renders
+// Preserve search input focus and scroll position across re-renders
 let lastFocusedSearchValue = null;
 const originalRender = render;
 window.render = function() {
   const active = document.activeElement;
   const wasSearch = active && active.id === 'searchInput';
   const caret = wasSearch ? active.selectionStart : null;
+  const scrollY = window.scrollY;
   originalRender();
+  // Restore scroll
+  if (scrollY > 0) window.scrollTo(0, scrollY);
+  // Restore search focus
   if (wasSearch) {
     const newSearch = document.getElementById('searchInput');
     if (newSearch) {
@@ -1260,7 +1335,7 @@ window.render = function() {
 // Expose for inline handlers
 Object.assign(window, {
   setView, setStatusFilter, setPage, openEdit, openNew, closeModal,
-  submitEdit, saveRecord, deleteRecord, markDeliveredAction, apiFetch, state
+  submitEdit, saveRecord, deleteRecord, markDeliveredAction, toggleChecklist, apiFetch, state
 });
 
 // ---------- Init ----------
