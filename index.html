@@ -226,7 +226,7 @@ table.data .remarks-hint { color: #fcd34d; font-size: 11px; margin-top: 4px; pad
 //  CONFIGURATION  —  replace the URL below after deploying
 //  the Apps Script (see SETUP.md, Step 3).
 // =============================================================
-const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwaoeGgfjk2iG4vu1ayTX6oZ_yRfFQYUqYu1aT-dNjV2-e2DBjphYM5J5O4v4SoHEKD/exec';
+const GOOGLE_SCRIPT_URL = 'PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE';
 const POLL_INTERVAL_MS  = 30000;
 const TICK_INTERVAL_MS  = 1000;
 // =============================================================
@@ -312,7 +312,10 @@ function getStatus(rec) {
   if (rec.delivered) return 'delivered';
   if (hasOccurred(rec.actualDeliveryDate)) return 'delivered';
   if (hasOccurred(rec.ata) || hasOccurred(rec.recovered)) return 'arrived';
-  if (hasOccurred(rec.atd) || hasOccurred(rec.etd)) return 'transit';
+  // "In transit" = we know it's moving OR we know when it'll arrive.
+  // Just an ATA/ETA being set (even with no ATD/ETD recorded yet) means
+  // the shipment is en route to US.
+  if (hasOccurred(rec.atd) || hasOccurred(rec.etd) || rec.ata || rec.eta) return 'transit';
   return 'pending';
 }
 
@@ -736,14 +739,14 @@ function renderOverview() {
   //             Countdown target: ATD (if set & future) → ETD → expected flying date
   //
   const arriving = active.filter(r => {
-    const departed = hasOccurred(r.atd) || hasOccurred(r.etd);
     const hasArrived = hasOccurred(r.ata) || hasOccurred(r.recovered);
-    if (!departed || hasArrived) return false;
-    return !!(r.ata || r.eta);
+    if (hasArrived) return false;
+    // Include any shipment with arrival info (ATA or ETA) OR known to have departed.
+    // The team often enters just ATA for a shipment heading to US — no ATD/ETD needed.
+    return !!(r.ata || r.eta) || hasOccurred(r.atd) || hasOccurred(r.etd);
   }).map(r => {
-    // Prefer ATA when it's a future date the airline gave us; else ETA
-    const ataFuture = r.ata && !isPast(r.ata);
-    const target = ataFuture ? r.ata : (r.eta || r.ata);
+    // Prefer ATA when set; else ETA
+    const target = r.ata || r.eta;
     return { rec: r, target, isArriving: true };
   }).filter(x => x.target).sort((a, b) => {
     const da = parseLocalDate(a.target), db = parseLocalDate(b.target);
@@ -753,6 +756,7 @@ function renderOverview() {
   const departing = active.filter(r => {
     if (hasOccurred(r.atd) || hasOccurred(r.etd)) return false; // already departed
     if (hasOccurred(r.ata) || hasOccurred(r.recovered)) return false; // already arrived
+    if (r.ata || r.eta) return false; // we know its arrival — belongs in Arriving panel
     return !!(r.atd || r.etd || r.expectedFlyingDate);
   }).map(r => {
     const atdFuture = r.atd && !isPast(r.atd);
@@ -850,6 +854,7 @@ function renderCountdownCard(rec, targetStr, isArriving) {
         <div class="countdown-timer ${urgency}" data-countdown-target="${escapeHtml(targetStr)}">${escapeHtml(fmtCountdown(target))}</div>
       </div>
       ${lastMile ? `<div class="countdown-row"><span>Last mile: ${escapeHtml(lastMile)}</span></div>` : ''}
+      ${rec.apod ? `<div class="countdown-row"><span style="background: rgba(14,165,233,0.15); color: #7dd3fc;">🛬 ${escapeHtml(rec.apod)}</span>${rec.nomination ? `<span>${escapeHtml(rec.nomination)}</span>` : ''}</div>` : (rec.nomination ? `<div class="countdown-row"><span>${escapeHtml(rec.nomination)}</span></div>` : '')}
       ${rec.remarks ? `<div class="countdown-row"><span style="background: rgba(245,158,11,0.12); color: #fcd34d;" title="${escapeHtml(rec.remarks)}">📝 ${escapeHtml(rec.remarks.slice(0, 80))}${rec.remarks.length > 80 ? '…' : ''}</span></div>` : ''}
       <div class="checklist">
         <label class="check-item ${rec.mailToAirlines ? 'done' : 'pending'}">
@@ -998,7 +1003,7 @@ function applyFilters(records) {
   const q = state.search.trim().toLowerCase();
   return records.filter(r => {
     if (q) {
-      const hay = [r.mawb, r.hawb, r.flightNumber, r.shipper, r.consignee, r.carrier, r.ltlVendor, r.airline, r.partner, r.port, r.uld, r.proNumber, r.remarks].filter(Boolean).join(' ').toLowerCase();
+      const hay = [r.mawb, r.hawb, r.flightNumber, r.shipper, r.consignee, r.carrier, r.ltlVendor, r.airline, r.partner, r.port, r.apod, r.nomination, r.uld, r.proNumber, r.remarks].filter(Boolean).join(' ').toLowerCase();
       if (!hay.includes(q)) return false;
     }
     if (state.statusFilter !== 'all') {
@@ -1157,6 +1162,8 @@ function renderEditModal() {
             ${isCommercial ? `
               <div class="field"><label>Shipper</label><input name="shipper" value="${escapeHtml(editing.shipper)}"></div>
               <div class="field"><label>Consignee / IOR</label><input name="consignee" value="${escapeHtml(editing.consignee)}"></div>
+              <div class="field"><label>APOD (destination airport)</label><input name="apod" value="${escapeHtml(editing.apod || '')}" placeholder="e.g. JFK, LAX, ATL, BHX"></div>
+              <div class="field"><label>Nomination</label><input name="nomination" value="${escapeHtml(editing.nomination || '')}"></div>
               <div class="field"><label>Weight (Kgs)</label><input name="weight" value="${escapeHtml(editing.weight)}"></div>
               <div class="field"><label>Incoterm</label><input name="incoterm" value="${escapeHtml(editing.incoterm)}"></div>
               <div class="field"><label>CFS</label><input name="cfs" value="${escapeHtml(editing.cfs)}"></div>
@@ -1237,6 +1244,7 @@ function newRecordTemplate() {
     pickupDate: '', estDeliveryDate: '', actualDeliveryDate: '',
     uld: '', partner: '', ocPartner: '', dcPartner: '',
     numPkgs: '', totalHawb: '', port: '', handoverDate: '', customsClearance: '',
+    apod: '', nomination: '', customClearance: '', customsDetailsSent: '',
     remarks: '',
     // Checklist — new MAWBs start unchecked so the operator ticks them off
     // as each step happens. Old MAWBs (already in the sheet before the
